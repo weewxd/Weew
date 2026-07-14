@@ -5,6 +5,8 @@ import {
 } from "lucide-react";
 import { TranslationDict } from "../types";
 import { UserAccount } from "./AuthModal";
+import { db } from "../firebase";
+import { collection, addDoc, query, orderBy, limit, onSnapshot, doc, deleteDoc, getDocs, writeBatch, setDoc } from "firebase/firestore";
 
 interface LiveChatBoardProps {
   translations: TranslationDict;
@@ -437,34 +439,80 @@ export default function LiveChatBoard({
     };
   }, [currentUser?.email, guestNickname]);
 
-  // Seed initial clean messages on mount
+  // Synchronize slowMode and isChatPaused settings with Firestore in real-time
   useEffect(() => {
-    const initialMsgs: ChatMessage[] = [];
-    
-    // Welcome message
-    initialMsgs.push({
-      id: `welcome-system-${Date.now()}`,
-      user: lang === "TR" ? "YAYIN SİSTEMİ" : "STREAM SYSTEM",
-      role: "system",
-      text: lang === "TR" 
-        ? "🤖 Gerçekçi Canlı Sohbet Arayüzüne Hoş Geldiniz! Kendiniz yazıp test edebilirsiniz."
-        : "🤖 Welcome to the Realistic Live Chat Interface! You can type and test your own messages.",
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      isSystem: true
+    const docRef = doc(db, "config", "portal");
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.isChatPaused !== undefined) {
+          setIsChatPaused(data.isChatPaused);
+          localStorage.setItem("weew_chat_paused", data.isChatPaused ? "true" : "false");
+        }
+        if (data.slowMode !== undefined) {
+          setSlowMode(data.slowMode);
+          localStorage.setItem("weew_chat_slow_mode", data.slowMode ? "true" : "false");
+        }
+      }
     });
 
-    // Command guidelines bot message
-    initialMsgs.push({
-      id: `welcome-bot-${Date.now() + 1}`,
-      user: "KickBot",
-      role: "moderator",
-      text: lang === "TR" 
-        ? "🎯 İnteraktif komutları denemek için sohbete !help yazın! (Diğer komutlar: !kick, !specs, !sens, !crosshair, !social)"
-        : "🎯 Type !help in chat to try interactive bot commands! (Other commands: !kick, !specs, !sens, !crosshair, !social)",
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    return () => unsubscribe();
+  }, []);
+
+  // Synchronize chat messages with Firestore in real-time
+  useEffect(() => {
+    const q = query(
+      collection(db, "chats"),
+      orderBy("createdAt", "desc"),
+      limit(80)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const chatList: ChatMessage[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        chatList.push({
+          id: doc.id,
+          user: data.user,
+          role: data.role as any,
+          text: data.text,
+          timestamp: data.timestamp,
+          isUser: data.isUser,
+          isSystem: data.isSystem,
+          adminBadgeColor: data.adminBadgeColor
+        });
+      });
+
+      if (chatList.length === 0) {
+        // Seed initial welcome messages if database is completely empty
+        setMessages([
+          {
+            id: `welcome-system-${Date.now()}`,
+            user: lang === "TR" ? "YAYIN SİSTEMİ" : "STREAM SYSTEM",
+            role: "system",
+            text: lang === "TR" 
+              ? "🤖 Gerçekçi Canlı Sohbet Arayüzüne Hoş Geldiniz! Kendiniz yazıp test edebilirsiniz."
+              : "🤖 Welcome to the Realistic Live Chat Interface! You can type and test your own messages.",
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            isSystem: true
+          },
+          {
+            id: `welcome-bot-${Date.now() + 1}`,
+            user: "KickBot",
+            role: "moderator",
+            text: lang === "TR" 
+              ? "🎯 İnteraktif komutları denemek için sohbete !help yazın! (Diğer komutlar: !kick, !specs, !sens, !crosshair, !social)"
+              : "🎯 Type !help in chat to try interactive bot commands! (Other commands: !kick, !specs, !sens, !crosshair, !social)",
+            timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          }
+        ]);
+      } else {
+        // Reverse because we query by desc but display chronologically (asc)
+        setMessages(chatList.reverse());
+      }
     });
 
-    setMessages(initialMsgs);
+    return () => unsubscribe();
   }, [lang]);
 
   // Handle scrolling behavior
@@ -495,28 +543,33 @@ export default function LiveChatBoard({
     setIsAutoScroll(isAtBottom);
   };
 
-  const handleToggleSlowMode = (enabled: boolean) => {
+  const handleToggleSlowMode = async (enabled: boolean) => {
     setSlowMode(enabled);
     localStorage.setItem("weew_chat_slow_mode", enabled ? "true" : "false");
     
     // Auto-inject a highly visible system notification message in chat
     const now = new Date();
-    const sysMsg: ChatMessage = {
-      id: `system-slowmode-${Date.now()}-${Math.random()}`,
-      user: lang === "TR" ? "SİSTEM" : "SYSTEM",
-      role: "system",
-      text: enabled
-        ? (lang === "TR"
-            ? "⚠️ Yavaş mod (3 saniye) yönetici tarafından açıldı. Lütfen sakin yazın!"
-            : "⚠️ Slow Mode (3 seconds) has been enabled by the administrator. Please chat slowly!")
-        : (lang === "TR"
-            ? "✅ Yavaş mod yönetici tarafından kapatıldı. Özgürce yazabilirsiniz!"
-            : "✅ Slow Mode has been disabled by the administrator. Feel free to chat!"),
-      timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      isSystem: true
-    };
+    const text = enabled
+      ? (lang === "TR"
+          ? "⚠️ Yavaş mod (3 saniye) yönetici tarafından açıldı. Lütfen sakin yazın!"
+          : "⚠️ Slow Mode (3 seconds) has been enabled by the administrator. Please chat slowly!")
+      : (lang === "TR"
+          ? "✅ Yavaş mod yönetici tarafından kapatıldı. Özgürce yazabilirsiniz!"
+          : "✅ Slow Mode has been disabled by the administrator. Feel free to chat!");
 
-    setMessages((prev) => [...prev.slice(-79), sysMsg]);
+    try {
+      await setDoc(doc(db, "config", "portal"), { slowMode: enabled }, { merge: true });
+      await addDoc(collection(db, "chats"), {
+        user: lang === "TR" ? "SİSTEM" : "SYSTEM",
+        role: "system",
+        text,
+        timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        isSystem: true,
+        createdAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Error sending slowmode notification:", err);
+    }
     setIsAutoScroll(true);
     
     if (audioEnabled) {
@@ -524,28 +577,33 @@ export default function LiveChatBoard({
     }
   };
 
-  const handleToggleChatPaused = (paused: boolean) => {
+  const handleToggleChatPaused = async (paused: boolean) => {
     setIsChatPaused(paused);
     localStorage.setItem("weew_chat_paused", paused ? "true" : "false");
     
     // Auto-inject a system notification message in chat
     const now = new Date();
-    const sysMsg: ChatMessage = {
-      id: `system-pause-${Date.now()}-${Math.random()}`,
-      user: lang === "TR" ? "SİSTEM" : "SYSTEM",
-      role: "system",
-      text: paused
-        ? (lang === "TR"
-            ? "⏸️ Canlı sohbet akışı yönetici tarafından duraklatıldı."
-            : "⏸️ Live chat stream has been paused by the administrator.")
-        : (lang === "TR"
-            ? "▶️ Canlı sohbet akışı yönetici tarafından başlatıldı."
-            : "▶️ Live chat stream has been resumed by the administrator."),
-      timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      isSystem: true
-    };
+    const text = paused
+      ? (lang === "TR"
+          ? "⏸️ Canlı sohbet akışı yönetici tarafından duraklatıldı."
+          : "⏸️ Live chat stream has been paused by the administrator.")
+      : (lang === "TR"
+          ? "▶️ Canlı sohbet akışı yönetici tarafından başlatıldı."
+          : "▶️ Live chat stream has been resumed by the administrator.");
 
-    setMessages((prev) => [...prev.slice(-79), sysMsg]);
+    try {
+      await setDoc(doc(db, "config", "portal"), { isChatPaused: paused }, { merge: true });
+      await addDoc(collection(db, "chats"), {
+        user: lang === "TR" ? "SİSTEM" : "SYSTEM",
+        role: "system",
+        text,
+        timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        isSystem: true,
+        createdAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Error sending pause notification:", err);
+    }
     setIsAutoScroll(true);
 
     if (audioEnabled) {
@@ -596,17 +654,20 @@ export default function LiveChatBoard({
     }
 
     // Bot responds in 800ms
-    setTimeout(() => {
+    setTimeout(async () => {
       const now = new Date();
-      const botMsg: ChatMessage = {
-        id: `bot-cmd-${Date.now()}-${Math.random()}`,
-        user: "KickBot",
-        role: "moderator",
-        text: replyText,
-        timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        isSystem: false
-      };
-      setMessages((prev) => [...prev.slice(-79), botMsg]);
+      try {
+        await addDoc(collection(db, "chats"), {
+          user: "KickBot",
+          role: "moderator",
+          text: replyText,
+          timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          createdAt: new Date().toISOString(),
+          isUser: false
+        });
+      } catch (err) {
+        console.error("Error sending bot command reply:", err);
+      }
       setIsAutoScroll(true);
       if (audioEnabled) {
         playPopSound();
@@ -614,7 +675,7 @@ export default function LiveChatBoard({
     }, 800);
   };
 
-  const handleSendMessage = (e?: React.FormEvent) => {
+  const handleSendMessage = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!inputText.trim()) return;
 
@@ -640,17 +701,20 @@ export default function LiveChatBoard({
 
     const messageContent = inputText.trim();
 
-    const userMsg: ChatMessage = {
-      id: `user-${Date.now()}-${Math.random()}`,
-      user: senderName,
-      role: senderRole,
-      text: messageContent,
-      timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      isUser: true,
-      ...(senderRole === "admin" ? { adminBadgeColor } : {})
-    };
+    try {
+      await addDoc(collection(db, "chats"), {
+        user: senderName,
+        role: senderRole,
+        text: messageContent,
+        timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        isUser: true,
+        createdAt: new Date().toISOString(),
+        ...(senderRole === "admin" ? { adminBadgeColor } : {})
+      });
+    } catch (err) {
+      console.error("Error sending chat message:", err);
+    }
 
-    setMessages((prev) => [...prev.slice(-79), userMsg]);
     setInputText("");
     setIsAutoScroll(true);
     setLastSentTimestamp(Date.now());
@@ -745,12 +809,26 @@ export default function LiveChatBoard({
   };
 
   // Moderation actions (only for Admin)
-  const handleDeleteMessage = (id: string) => {
-    setMessages((prev) => prev.filter((m) => m.id !== id));
+  const handleDeleteMessage = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "chats", id));
+    } catch (err) {
+      console.error("Error deleting message:", err);
+    }
   };
 
-  const handleClearChat = () => {
-    setMessages([]);
+  const handleClearChat = async () => {
+    try {
+      const q = query(collection(db, "chats"), limit(100));
+      const querySnapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      querySnapshot.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error("Error clearing chat:", err);
+    }
   };
 
   // Render role badges

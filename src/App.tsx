@@ -16,9 +16,11 @@ import { UserProfile } from "./components/EditProfileModal";
 import CS2SettingsSection, { CS2SettingsData } from "./components/CS2SettingsSection";
 import CrosshairSection, { DEFAULT_CROSSHAIRS } from "./components/CrosshairSection";
 import GiveawaySection from "./components/GiveawaySection";
-import { TRANSLATIONS, PLAYLISTS, SYSTEM_SPECS } from "./data";
+import { TRANSLATIONS, PLAYLISTS, SYSTEM_SPECS, DEFAULT_GIVEAWAYS } from "./data";
 import { CrosshairItem, PlaylistItem, SpecItem, Announcement } from "./types";
 import AnnouncementSection from "./components/AnnouncementSection";
+import { db } from "./firebase";
+import { doc, setDoc, onSnapshot } from "firebase/firestore";
 
 const DEFAULT_PROFILE: UserProfile = {
   siteName: "İnan",
@@ -82,7 +84,153 @@ const DEFAULT_CS2_SETTINGS: CS2SettingsData = {
 export default function App() {
   const [lang, setLang] = useState<"TR" | "EN">("TR");
   const [activeSection, setActiveSection] = useState("home");
-  
+
+  const lastReceivedConfig = useRef<string>("");
+
+  const updateConfigDoc = async (updates: any) => {
+    try {
+      const docRef = doc(db, "config", "portal");
+      await setDoc(docRef, updates, { merge: true });
+    } catch (err) {
+      console.error("Error updating config:", err);
+    }
+  };
+
+  useEffect(() => {
+    const docRef = doc(db, "config", "portal");
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        
+        const serialized = JSON.stringify({
+          giveaways: data.giveaways || [],
+          activeSpinTrigger: data.activeSpinTrigger || null
+        });
+        lastReceivedConfig.current = serialized;
+
+        if (data.profile !== undefined) setProfile(data.profile);
+        if (data.isStreamLive !== undefined) setIsStreamLive(data.isStreamLive);
+        if (data.streamCategory !== undefined) setStreamCategory(data.streamCategory);
+        if (data.streamTitle !== undefined) setStreamTitle(data.streamTitle);
+        if (data.streamViewers !== undefined) setStreamViewers(data.streamViewers);
+        if (data.kickApiEnabled !== undefined) setKickApiEnabled(data.kickApiEnabled);
+        if (data.cs2Settings !== undefined) setCs2Settings(data.cs2Settings);
+        if (data.crosshairs !== undefined) setCrosshairs(data.crosshairs);
+        if (data.playlists !== undefined) setPlaylists(data.playlists);
+        if (data.systemSpecs !== undefined) setSystemSpecs(data.systemSpecs);
+        if (data.announcements !== undefined) setAnnouncements(data.announcements);
+        if (data.isRegistrationDisabled !== undefined) setIsRegistrationDisabled(data.isRegistrationDisabled);
+        if (data.visitorCount !== undefined) setVisitorCount(data.visitorCount);
+
+        if (data.giveaways !== undefined) {
+          const localGiveawaysStr = localStorage.getItem("weew_giveaways") || "[]";
+          const firestoreGiveawaysStr = JSON.stringify(data.giveaways);
+          if (localGiveawaysStr !== firestoreGiveawaysStr) {
+            localStorage.setItem("weew_giveaways", firestoreGiveawaysStr);
+            window.dispatchEvent(new CustomEvent("weew_giveaway_update"));
+          }
+        }
+
+        if (data.activeSpinTrigger !== undefined && data.activeSpinTrigger !== null) {
+          const localSpinTriggerStr = localStorage.getItem("weew_active_spin_trigger") || "null";
+          const firestoreSpinTriggerStr = JSON.stringify(data.activeSpinTrigger);
+          if (localSpinTriggerStr !== firestoreSpinTriggerStr) {
+            const lastTriggered = localStorage.getItem("weew_last_triggered_spin") || "0";
+            if (data.activeSpinTrigger.timestamp > parseInt(lastTriggered, 10)) {
+              localStorage.setItem("weew_active_spin_trigger", firestoreSpinTriggerStr);
+              localStorage.setItem("weew_last_triggered_spin", data.activeSpinTrigger.timestamp.toString());
+              window.dispatchEvent(new CustomEvent("weew_active_spin_trigger_fired", { detail: data.activeSpinTrigger }));
+            }
+          }
+        }
+      } else {
+        const initialData = {
+          profile: DEFAULT_PROFILE,
+          isStreamLive: false,
+          streamCategory: "Counter-Strike 2",
+          streamTitle: "Rekabetçi Maçlar & Topluluk Yayını",
+          streamViewers: "1400",
+          kickApiEnabled: false,
+          cs2Settings: DEFAULT_CS2_SETTINGS,
+          crosshairs: DEFAULT_CROSSHAIRS,
+          playlists: PLAYLISTS,
+          systemSpecs: SYSTEM_SPECS,
+          announcements: [
+            {
+              id: "ann-1",
+              titleTR: "🌟 Sezonun İlk Büyük Topluluk Turnuvası!",
+              titleEN: "🌟 Season's First Major Community Tournament!",
+              contentTR: "Selam topluluk! Bu Cuma saat 20:00'de Discord üzerinden 5v5 özel ödüllü turnuvamız başlıyor. Kayıtlar tamamen ücretsizdir ve kazanan takıma seçkin skin ödülleri verilecektir! Detaylar için Discord'da #duyuru kanalına bakmayı unutmayın.",
+              contentEN: "Hey community! This Friday at 20:00, our 5v5 special prize tournament kicks off on Discord. Registration is completely free, and the winning team will receive premium skin prizes! Check out the #announcements channel on Discord for details.",
+              date: "2026-07-07",
+              badgeTR: "TURNUVA",
+              badgeEN: "TOURNAMENT",
+              importance: "high",
+              active: true
+            },
+            {
+              id: "ann-2",
+              titleTR: "🚀 Yeni Crosshair ve Başlatma Kodları Eklendi",
+              titleEN: "🚀 New Crosshairs & Launch Options Added",
+              contentTR: "Zowie XL2566K 360Hz monitörüme geçişimle birlikte kullandığım yeni çözünürlük (1280x960 4:3 stretched) ve en güncel crosshair kodlarımı sizler için panelde paylaştım. Kopyalamak için hemen 'Ayarlar' ve 'Crosshair' sayfasına göz atabilirsiniz!",
+              contentEN: "Along with my switch to the Zowie XL2566K 360Hz monitor, I shared my new resolution (1280x960 4:3 stretched) and my latest crosshair codes on the panel. Browse the 'Settings' and 'Crosshair' pages to copy them now!",
+              date: "2026-07-06",
+              badgeTR: "GÜNCELLEME",
+              badgeEN: "UPDATE",
+              importance: "medium",
+              active: true
+            }
+          ],
+          isRegistrationDisabled: false,
+          visitorCount: 0,
+          giveaways: DEFAULT_GIVEAWAYS,
+          activeSpinTrigger: null
+        };
+        setDoc(docRef, initialData).catch(err => console.error("Error seeding config:", err));
+      }
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const uploadLocalChanges = () => {
+      const giveawaysStr = localStorage.getItem("weew_giveaways") || "[]";
+      const activeSpinStr = localStorage.getItem("weew_active_spin_trigger") || "null";
+      
+      let giveawaysObj = [];
+      let activeSpinObj = null;
+      try { giveawaysObj = JSON.parse(giveawaysStr); } catch(e){}
+      try { activeSpinObj = JSON.parse(activeSpinStr); } catch(e){}
+
+      let lastGiveawaysStr = "[]";
+      let lastActiveSpinStr = "null";
+      try {
+        const parsedLast = JSON.parse(lastReceivedConfig.current);
+        lastGiveawaysStr = JSON.stringify(parsedLast.giveaways || []);
+        lastActiveSpinStr = JSON.stringify(parsedLast.activeSpinTrigger || null);
+      } catch(e){}
+
+      const needsUpdate = giveawaysStr !== lastGiveawaysStr || activeSpinStr !== lastActiveSpinStr;
+      if (needsUpdate) {
+        updateConfigDoc({
+          giveaways: giveawaysObj,
+          activeSpinTrigger: activeSpinObj
+        });
+      }
+    };
+
+    window.addEventListener("storage", uploadLocalChanges);
+    window.addEventListener("weew_giveaway_update", uploadLocalChanges);
+    window.addEventListener("weew_active_spin_trigger_fired", uploadLocalChanges as EventListener);
+    
+    return () => {
+      window.removeEventListener("storage", uploadLocalChanges);
+      window.removeEventListener("weew_giveaway_update", uploadLocalChanges);
+      window.removeEventListener("weew_active_spin_trigger_fired", uploadLocalChanges as EventListener);
+    };
+  }, []);
+
   const [isStreamLive, setIsStreamLive] = useState<boolean>(() => {
     return localStorage.getItem("weew_is_stream_live") === "true";
   });
@@ -90,6 +238,7 @@ export default function App() {
   const handleSetIsStreamLive = (val: boolean) => {
     setIsStreamLive(val);
     localStorage.setItem("weew_is_stream_live", val ? "true" : "false");
+    updateConfigDoc({ isStreamLive: val });
   };
 
   // Simulated Kick Live Stream details managed dynamically via Admin Panel
@@ -106,16 +255,19 @@ export default function App() {
   const handleSaveStreamCategory = (val: string) => {
     setStreamCategory(val);
     localStorage.setItem("weew_stream_category", val);
+    updateConfigDoc({ streamCategory: val });
   };
 
   const handleSaveStreamTitle = (val: string) => {
     setStreamTitle(val);
     localStorage.setItem("weew_stream_title", val);
+    updateConfigDoc({ streamTitle: val });
   };
 
   const handleSaveStreamViewers = (val: string) => {
     setStreamViewers(val);
     localStorage.setItem("weew_stream_viewers", val);
+    updateConfigDoc({ streamViewers: val });
   };
 
   // Kick API Auto-Sync Simulation States
@@ -130,6 +282,7 @@ export default function App() {
   const handleSetKickApiEnabled = (enabled: boolean) => {
     setKickApiEnabled(enabled);
     localStorage.setItem("weew_kick_api_enabled", enabled ? "true" : "false");
+    updateConfigDoc({ kickApiEnabled: enabled });
     
     const timeStr = new Date().toLocaleTimeString("tr-TR");
     if (enabled) {
@@ -166,6 +319,7 @@ export default function App() {
         const newVal = Math.max(120, currentVal + change);
         updatedViewers = newVal.toString();
         localStorage.setItem("weew_stream_viewers", updatedViewers);
+        updateConfigDoc({ streamViewers: updatedViewers });
         return updatedViewers;
       });
 
@@ -392,6 +546,7 @@ export default function App() {
   const handleToggleRegistration = (disabled: boolean) => {
     setIsRegistrationDisabled(disabled);
     localStorage.setItem("weew_registration_disabled", disabled ? "true" : "false");
+    updateConfigDoc({ isRegistrationDisabled: disabled });
   };
 
   // Secret admin backdoor triggers (URL parameter or keyboard shortcut)
@@ -433,6 +588,7 @@ export default function App() {
   const handleSaveVisitorCount = (count: number) => {
     setVisitorCount(count);
     localStorage.setItem("weew_visitor_count", count.toString());
+    updateConfigDoc({ visitorCount: count });
   };
 
   useEffect(() => {
@@ -548,31 +704,37 @@ export default function App() {
   const handleSaveProfile = (updated: UserProfile) => {
     setProfile(updated);
     localStorage.setItem("weew_user_profile", JSON.stringify(updated));
+    updateConfigDoc({ profile: updated });
   };
 
   const handleSaveCs2Settings = (updated: CS2SettingsData) => {
     setCs2Settings(updated);
     localStorage.setItem("weew_cs2_settings", JSON.stringify(updated));
+    updateConfigDoc({ cs2Settings: updated });
   };
 
   const handleSaveCrosshairs = (updated: CrosshairItem[]) => {
     setCrosshairs(updated);
     localStorage.setItem("weew_crosshairs", JSON.stringify(updated));
+    updateConfigDoc({ crosshairs: updated });
   };
 
   const handleSavePlaylists = (updated: PlaylistItem[]) => {
     setPlaylists(updated);
     localStorage.setItem("weew_playlists", JSON.stringify(updated));
+    updateConfigDoc({ playlists: updated });
   };
 
   const handleSaveSystemSpecs = (updated: SpecItem[]) => {
     setSystemSpecs(updated);
     localStorage.setItem("weew_system_specs", JSON.stringify(updated));
+    updateConfigDoc({ systemSpecs: updated });
   };
 
   const handleSaveAnnouncements = (updated: Announcement[]) => {
     setAnnouncements(updated);
     localStorage.setItem("weew_announcements", JSON.stringify(updated));
+    updateConfigDoc({ announcements: updated });
   };
 
   const handleLoginSuccess = (user: UserAccount) => {
