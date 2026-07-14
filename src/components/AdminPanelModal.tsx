@@ -6,7 +6,7 @@ import {
   Upload, Smartphone, Sliders, Play, Info, Plus, Target, ExternalLink,
   LayoutDashboard, Radio, Eye, Activity, Youtube, Megaphone, Cpu, Layers, Bell,
   Sparkles, Download, Gift, Trophy, Search, Filter, CheckCheck, Copy, MailOpen,
-  Menu, LogOut, Link
+  Menu, LogOut, Link, ShieldAlert, Ban
 } from "lucide-react";
 import { UserProfile } from "./EditProfileModal";
 import { UserAccount } from "./AuthModal";
@@ -15,6 +15,8 @@ import { CrosshairItem, PlaylistItem, SpecItem, Announcement, GiveawayItem } fro
 import { DEFAULT_GIVEAWAYS } from "../data";
 import { triggerWebhook } from "../utils/webhookHelper";
 import { WebhookIntegrationsPanel } from "./WebhookIntegrationsPanel";
+import { db } from "../firebase";
+import { collection, query, orderBy, onSnapshot, doc, deleteDoc, updateDoc, setDoc } from "firebase/firestore";
 
 const ANNOUNCEMENT_TEMPLATES = [
   {
@@ -197,11 +199,42 @@ export default function AdminPanelModal({
   notificationsEnabled = false,
   onToggleNotifications
 }: AdminPanelModalProps) {
-  const [activeSubTab, setActiveSubTab] = useState<"dashboard" | "profile" | "settings" | "inbox" | "users" | "stream" | "crosshairs" | "playlists" | "specs" | "announcements" | "giveaways" | "integrations">("dashboard");
+  const [activeSubTab, setActiveSubTab] = useState<"dashboard" | "profile" | "settings" | "inbox" | "users" | "stream" | "crosshairs" | "playlists" | "specs" | "announcements" | "giveaways" | "integrations" | "moderation">("dashboard");
   const [formData, setFormData] = useState<UserProfile>({ ...profile });
   const [settingsForm, setSettingsForm] = useState<CS2SettingsData>({ ...cs2Settings });
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Chat Moderation Panel States
+  const [moderatedUsers, setModeratedUsers] = useState<{
+    id: string;
+    username: string;
+    email: string;
+    warnings: number;
+    mutedUntil: string | null;
+    banned: boolean;
+    updatedAt: string;
+  }[]>([]);
+
+  useEffect(() => {
+    if (activeSubTab !== "moderation") return;
+    const q = query(collection(db, "moderation"), orderBy("updatedAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() });
+      });
+      setModeratedUsers(list);
+    }, (error) => {
+      console.error("Error fetching moderated users:", error);
+    });
+    return () => unsubscribe();
+  }, [activeSubTab]);
+
+  // Manual Moderation Form States
+  const [manualUserKey, setManualUserKey] = useState("");
+  const [manualActionType, setManualActionType] = useState<"warn" | "mute" | "ban">("ban");
+  const [moderationSearch, setModerationSearch] = useState("");
 
   // Live Chat Settings and Roles States
   const [modPassword, setModPassword] = useState<string>(() => {
@@ -1394,6 +1427,7 @@ export default function AdminPanelModal({
             { id: "announcements", label: "Duyuru Paneli (Duyurular)", subTab: "announcements" as const, icon: Megaphone, badge: announcements.length },
             { id: "inbox", label: "Gelen İletişim Formları", subTab: "inbox" as const, icon: Mail, badge: messages.length },
             { id: "users", label: "Kayıtlı Kullanıcılar", subTab: "users" as const, icon: Users },
+            { id: "moderation", label: "Sohbet Moderasyonu", subTab: "moderation" as const, icon: ShieldAlert },
 
             { type: "header" as const, label: "Site İçeriği" },
             { id: "profile", label: "Profil & Slider Yönetimi", subTab: "profile" as const, icon: Image },
@@ -1630,6 +1664,7 @@ export default function AdminPanelModal({
                 {activeSubTab === "specs" && "Sistem Donanım & Ekipman Özellikleri Yönetimi"}
                 {activeSubTab === "announcements" && "Duyuru Paneli Yönetimi"}
                 {activeSubTab === "giveaways" && "İnteraktif Çekiliş Yönetim Merkezi"}
+                {activeSubTab === "moderation" && "Sohbet Moderasyon Paneli (Ban / Mute)"}
               </h2>
             </div>
 
@@ -5398,6 +5433,349 @@ export default function AdminPanelModal({
                             ))}
                         </div>
                       )}
+                    </div>
+
+                  </div>
+
+                </div>
+
+              </div>
+            )}
+
+
+            {/* Tab: Chat Moderation */}
+            {activeSubTab === "moderation" && (
+              <div className="space-y-6">
+                {/* Stats cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="bg-[#11121d] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-mono text-red-400 font-extrabold uppercase tracking-widest block mb-0.5">YASAKLANMIŞ</span>
+                      <h4 className="text-xl font-bold font-display text-white">
+                        {moderatedUsers.filter(u => u.banned).length}
+                      </h4>
+                    </div>
+                    <div className="h-10 w-10 bg-red-500/10 border border-red-500/20 rounded-xl flex items-center justify-center text-red-400">
+                      <Ban className="h-5 w-5" />
+                    </div>
+                  </div>
+
+                  <div className="bg-[#11121d] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-mono text-amber-400 font-extrabold uppercase tracking-widest block mb-0.5">SUSTURULMUŞ</span>
+                      <h4 className="text-xl font-bold font-display text-white">
+                        {moderatedUsers.filter(u => u.mutedUntil && new Date(u.mutedUntil).getTime() > Date.now()).length}
+                      </h4>
+                    </div>
+                    <div className="h-10 w-10 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-center justify-center text-amber-400">
+                      <ShieldAlert className="h-5 w-5" />
+                    </div>
+                  </div>
+
+                  <div className="bg-[#11121d] border border-white/5 rounded-2xl p-4 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-mono text-purple-400 font-extrabold uppercase tracking-widest block mb-0.5">UYARI ALMIŞ</span>
+                      <h4 className="text-xl font-bold font-display text-white">
+                        {moderatedUsers.filter(u => u.warnings > 0 && !u.banned).length}
+                      </h4>
+                    </div>
+                    <div className="h-10 w-10 bg-purple-500/10 border border-purple-500/20 rounded-xl flex items-center justify-center text-purple-400">
+                      <AlertCircle className="h-5 w-5" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Main dual column layout */}
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  
+                  {/* Left Column: Moderated list */}
+                  <div className="lg:col-span-8 bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-4">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-3 border-b border-white/5">
+                      <div>
+                        <h4 className="font-display text-xs font-black uppercase tracking-wider text-white">
+                          Cezalandırılmış Üye & Misafir Sicil Listesi
+                        </h4>
+                        <p className="text-[10px] text-gray-500 mt-0.5 font-semibold">
+                          Küfür filtreleme sistemi tarafından uyarılan, susturulan veya yasaklanan kişilerin listesi.
+                        </p>
+                      </div>
+                      
+                      {/* Search bar */}
+                      <div className="relative w-full sm:w-48 shrink-0">
+                        <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-gray-500" />
+                        <input
+                          type="text"
+                          placeholder="Ara..."
+                          value={moderationSearch}
+                          onChange={(e) => setModerationSearch(e.target.value)}
+                          className="w-full bg-[#0a0b10] border border-white/5 rounded-xl pl-8 pr-3 py-1.5 text-[11px] text-white focus:outline-none focus:border-purple-500/40 transition font-semibold"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Filtered list */}
+                    <div className="space-y-3 max-h-[420px] overflow-y-auto custom-scrollbar pr-1">
+                      {moderatedUsers.filter(u => {
+                        if (!moderationSearch.trim()) return true;
+                        const s = moderationSearch.toLowerCase();
+                        return (u.username || "").toLowerCase().includes(s) || (u.id || "").toLowerCase().includes(s);
+                      }).length === 0 ? (
+                        <div className="py-12 text-center text-gray-500 text-xs font-semibold">
+                          {moderationSearch.trim() ? "Arama kriterine uygun ceza kaydı bulunamadı." : "Sistemde kayıtlı herhangi bir ceza kaydı bulunmuyor."}
+                        </div>
+                      ) : (
+                        moderatedUsers
+                          .filter(u => {
+                            if (!moderationSearch.trim()) return true;
+                            const s = moderationSearch.toLowerCase();
+                            return (u.username || "").toLowerCase().includes(s) || (u.id || "").toLowerCase().includes(s);
+                          })
+                          .map((user) => {
+                            const isUserMuted = user.mutedUntil && new Date(user.mutedUntil).getTime() > Date.now();
+                            const muteRemaining = isUserMuted 
+                              ? Math.ceil((new Date(user.mutedUntil!).getTime() - Date.now()) / 1000) 
+                              : 0;
+
+                            return (
+                              <div
+                                key={user.id}
+                                className="p-3.5 rounded-xl bg-white/[0.02] border border-white/5 hover:bg-[#0c0d16] transition flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                    <span className="text-[10px] font-black text-white tracking-wide uppercase truncate">
+                                      {user.username || user.id}
+                                    </span>
+                                    {user.banned ? (
+                                      <span className="text-[8px] font-mono font-black text-red-400 bg-red-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">BANLANDI</span>
+                                    ) : isUserMuted ? (
+                                      <span className="text-[8px] font-mono font-black text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">SUSTURULDU ({Math.ceil(muteRemaining / 60)}dk)</span>
+                                    ) : (
+                                      <span className="text-[8px] font-mono font-black text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded uppercase tracking-wider">UYARILI ({user.warnings}/3)</span>
+                                    )}
+                                  </div>
+                                  <div className="text-[9px] text-gray-500 flex flex-col gap-0.5 font-mono">
+                                    <span className="truncate">Sistem ID: {user.id}</span>
+                                    <span>Son Olay: {new Date(user.updatedAt).toLocaleString("tr-TR")}</span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 w-full sm:w-auto self-stretch sm:self-center justify-end">
+                                  {user.banned && (
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          await updateDoc(doc(db, "moderation", user.id), {
+                                            banned: false,
+                                            warnings: 0,
+                                            updatedAt: new Date().toISOString()
+                                          });
+                                          showToast("Kullanıcının engeli kaldırıldı!", "success");
+                                        } catch (err) {
+                                          console.error(err);
+                                          showToast("Hata oluştu!", "error");
+                                        }
+                                      }}
+                                      className="flex-1 sm:flex-none text-[9px] font-black uppercase tracking-wider rounded-lg px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-black border border-emerald-500/20 transition cursor-pointer"
+                                    >
+                                      Engeli Kaldır
+                                    </button>
+                                  )}
+
+                                  {isUserMuted && (
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        try {
+                                          await updateDoc(doc(db, "moderation", user.id), {
+                                            mutedUntil: null,
+                                            updatedAt: new Date().toISOString()
+                                          });
+                                          showToast("Susturma kaldırıldı!", "success");
+                                        } catch (err) {
+                                          console.error(err);
+                                          showToast("Hata oluştu!", "error");
+                                        }
+                                      }}
+                                      className="flex-1 sm:flex-none text-[9px] font-black uppercase tracking-wider rounded-lg px-2.5 py-1.5 bg-amber-500/10 hover:bg-amber-500 text-amber-400 hover:text-black border border-amber-500/20 transition cursor-pointer"
+                                    >
+                                      Susturmayı Aç
+                                    </button>
+                                  )}
+
+                                  <button
+                                    type="button"
+                                    onClick={async () => {
+                                      try {
+                                        await deleteDoc(doc(db, "moderation", user.id));
+                                        showToast("Kullanıcının sicili tamamen temizlendi!", "success");
+                                      } catch (err) {
+                                        console.error(err);
+                                        showToast("Hata oluştu!", "error");
+                                      }
+                                    }}
+                                    className="flex-1 sm:flex-none text-[9px] font-black uppercase tracking-wider rounded-lg px-2.5 py-1.5 bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white border border-red-500/20 transition cursor-pointer"
+                                    title="Tüm moderasyon kayıtlarını siler ve sıfırlar"
+                                  >
+                                    Sicili Sıfırla
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right Column: Manual Action Form & Policy */}
+                  <div className="lg:col-span-4 space-y-6">
+                    
+                    {/* Manual Ban/Mute box */}
+                    <div className="bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-4">
+                      <div className="flex items-center gap-2 text-purple-400 pb-3 border-b border-white/5">
+                        <Plus className="h-4 w-4" />
+                        <h4 className="font-display text-xs font-black uppercase tracking-wider">
+                          Manuel Ceza Uygula
+                        </h4>
+                      </div>
+
+                      <form 
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (!manualUserKey.trim()) return;
+                          const targetId = manualUserKey.trim().replace(/\//g, "_");
+                          const docRef = doc(db, "moderation", targetId);
+                          const userLabel = manualUserKey.trim();
+
+                          try {
+                            if (manualActionType === "warn") {
+                              await setDoc(docRef, {
+                                warnings: 1,
+                                mutedUntil: null,
+                                banned: false,
+                                username: userLabel,
+                                email: userLabel.includes("@") ? userLabel : "Guest",
+                                updatedAt: new Date().toISOString()
+                              }, { merge: true });
+                              showToast(`${userLabel} kullanıcısına 1. Uyarı uygulandı!`, "success");
+                            } else if (manualActionType === "mute") {
+                              const mutedUntilTime = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+                              await setDoc(docRef, {
+                                warnings: 2,
+                                mutedUntil: mutedUntilTime,
+                                banned: false,
+                                username: userLabel,
+                                email: userLabel.includes("@") ? userLabel : "Guest",
+                                updatedAt: new Date().toISOString()
+                              }, { merge: true });
+                              showToast(`${userLabel} kullanıcısı 5 dakika susturuldu!`, "success");
+                            } else {
+                              await setDoc(docRef, {
+                                warnings: 3,
+                                mutedUntil: null,
+                                banned: true,
+                                username: userLabel,
+                                email: userLabel.includes("@") ? userLabel : "Guest",
+                                updatedAt: new Date().toISOString()
+                              }, { merge: true });
+                              showToast(`${userLabel} kullanıcısı süresiz engellendi!`, "success");
+                            }
+                            setManualUserKey("");
+                          } catch (err) {
+                            console.error(err);
+                            showToast("İşlem başarısız!", "error");
+                          }
+                        }} 
+                        className="space-y-4"
+                      >
+                        {/* Target User */}
+                        <div className="space-y-1.5">
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                            Kullanıcı Adı, E-Posta veya ID
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Örn: weew_guest_99 veya e-posta"
+                            value={manualUserKey}
+                            onChange={(e) => setManualUserKey(e.target.value)}
+                            className="w-full bg-[#0a0b10] border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-purple-500/40 transition font-semibold"
+                          />
+                        </div>
+
+                        {/* Action Type */}
+                        <div className="space-y-1.5">
+                          <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                            Uygulanacak Ceza Türü
+                          </label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {(["warn", "mute", "ban"] as const).map((type) => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => setManualActionType(type)}
+                                className={`py-2 rounded-xl text-[10px] font-black uppercase tracking-wider border transition cursor-pointer ${
+                                  manualActionType === type
+                                    ? type === "ban"
+                                      ? "bg-red-500/15 border-red-500 text-red-400"
+                                      : type === "mute"
+                                        ? "bg-amber-500/15 border-amber-500 text-amber-400"
+                                        : "bg-purple-500/15 border-purple-500 text-purple-400"
+                                    : "bg-black/20 border-white/5 text-gray-500 hover:text-gray-300 hover:border-white/10"
+                                }`}
+                              >
+                                {type === "warn" && "Uyarı ver"}
+                                {type === "mute" && "5dk Mute"}
+                                {type === "ban" && "Banla"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Submit Button */}
+                        <button
+                          type="submit"
+                          disabled={!manualUserKey.trim()}
+                          className="w-full rounded-xl bg-purple-600 hover:bg-purple-500 disabled:bg-gray-800 disabled:text-gray-600 font-black text-xs uppercase tracking-wider text-white py-3 transition cursor-pointer shadow-[0_0_15px_rgba(168,85,247,0.2)] disabled:shadow-none"
+                        >
+                          Cezayı Onayla & Uygula
+                        </button>
+                      </form>
+                    </div>
+
+                    {/* Moderation Rules & Information Card */}
+                    <div className="bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-3.5">
+                      <div className="flex items-center gap-2 text-[#00e676]">
+                        <Shield className="h-4 w-4" />
+                        <h4 className="font-display text-xs font-black uppercase tracking-wider">
+                          Yayıncı & Admin Politikası
+                        </h4>
+                      </div>
+                      
+                      <div className="space-y-3 text-[10.5px] leading-relaxed text-gray-400 font-semibold">
+                        <div className="flex gap-2">
+                          <span className="text-[#00e676]">1.</span>
+                          <p>
+                            <strong>İlk Küfürlü Mesaj (1. İhlal):</strong> Kullanıcı sistem tarafından otomatik olarak uyarılır ve yazdığı küfürlü kelime sansürlenir.
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="text-amber-400">2.</span>
+                          <p>
+                            <strong>İkinci Küfürlü Mesaj (2. İhlal):</strong> Kullanıcı <strong>5 dakika</strong> boyunca sohbete yazmaktan men edilir (Susturulur).
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <span className="text-red-400">3.</span>
+                          <p>
+                            <strong>Üçüncü Küfürlü Mesaj (3. İhlal):</strong> Kullanıcı süresiz olarak canlı sohbet sisteminden <strong>yasaklanır</strong> (Banlanır).
+                          </p>
+                        </div>
+                        <div className="pt-2 border-t border-white/5 text-[9.5px] text-gray-500">
+                          * Admin ve Moderatör rolleri küfür engelleme ve ceza sisteminden tamamen muaftır.
+                        </div>
+                      </div>
                     </div>
 
                   </div>

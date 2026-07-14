@@ -129,6 +129,19 @@ const censorText = (text: string, blacklist: string[]): string => {
   return censored;
 };
 
+const hasSwear = (text: string, blacklist: string[]): boolean => {
+  if (!text) return false;
+  const lowerText = text.toLowerCase();
+  for (const word of blacklist) {
+    if (!word || word.trim() === "") continue;
+    // We match individual words or sub-elements for swear detection
+    if (lowerText.includes(word.toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export default function LiveChatBoard({
   translations,
   isStreamLive,
@@ -168,6 +181,15 @@ export default function LiveChatBoard({
     const randNum = Math.floor(1000 + Math.random() * 9000);
     return `Gezgin#${randNum}`;
   });
+
+  // Moderation state
+  const [modStatus, setModStatus] = useState<{
+    warnings: number;
+    mutedUntil: string | null;
+    banned: boolean;
+  } | null>(null);
+
+  const [remainingMuteSeconds, setRemainingMuteSeconds] = useState(0);
 
   const [showNickSettings, setShowNickSettings] = useState(false);
   const [tempNick, setTempNick] = useState(guestNickname);
@@ -439,6 +461,45 @@ export default function LiveChatBoard({
     };
   }, [currentUser?.email, guestNickname]);
 
+  // Subscribe to this user's moderation status in Firestore
+  useEffect(() => {
+    const userKey = currentUser ? currentUser.email : guestNickname;
+    const docId = userKey.replace(/\//g, "_");
+    const docRef = doc(db, "moderation", docId);
+    
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setModStatus({
+          warnings: data.warnings || 0,
+          mutedUntil: data.mutedUntil || null,
+          banned: !!data.banned,
+        });
+      } else {
+        setModStatus(null);
+      }
+    }, (error) => {
+      console.error("Error fetching moderation status:", error);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser, guestNickname]);
+
+  // Handle active mute timer countdown
+  useEffect(() => {
+    if (!modStatus?.mutedUntil) {
+      setRemainingMuteSeconds(0);
+      return;
+    }
+    const updateTimer = () => {
+      const ms = new Date(modStatus.mutedUntil!).getTime() - Date.now();
+      setRemainingMuteSeconds(Math.max(0, Math.ceil(ms / 1000)));
+    };
+    updateTimer();
+    const interval = setInterval(updateTimer, 1000);
+    return () => clearInterval(interval);
+  }, [modStatus?.mutedUntil]);
+
   // Synchronize slowMode and isChatPaused settings with Firestore in real-time
   useEffect(() => {
     const docRef = doc(db, "config", "portal");
@@ -679,8 +740,32 @@ export default function LiveChatBoard({
     if (e) e.preventDefault();
     if (!inputText.trim()) return;
 
+    // Check if chat is paused globally
+    const isUserAdmin = currentUser?.role === "admin" || testRole === "admin";
+    if (isChatPaused && !isUserAdmin && testRole !== "moderator") {
+      alert(lang === "TR" ? "Sohbet şu anda yöneticiler tarafından donduruldu!" : "Chat is currently paused by administrators!");
+      return;
+    }
+
+    // Check if banned or muted
+    const isUserBanned = modStatus?.banned === true;
+    const isUserMuted = modStatus?.mutedUntil ? new Date(modStatus.mutedUntil).getTime() > Date.now() : false;
+
+    if (isUserBanned) {
+      alert(lang === "TR" ? "Sohbetten kalıcı olarak engellendiniz!" : "You are permanently banned from the chat!");
+      return;
+    }
+
+    if (isUserMuted) {
+      const remainingMs = new Date(modStatus!.mutedUntil!).getTime() - Date.now();
+      const remainingSecs = Math.max(0, Math.ceil(remainingMs / 1000));
+      alert(lang === "TR" ? `Konuşma yasağınız var! Kalan süre: ${remainingSecs} saniye` : `You are muted! Remaining: ${remainingSecs} seconds`);
+      return;
+    }
+
     // Check slow mode (Admin / Moderator / TestAdmin bypasses)
     const isAdmin = currentUser?.role === "admin" || testRole === "admin";
+    const isModeratorOrAdmin = isAdmin || testRole === "moderator" || currentUser?.role === "user" && testRole === "moderator"; // simple check
     if (slowMode && slowCountdown > 0 && !isAdmin) {
       return;
     }
@@ -700,6 +785,97 @@ export default function LiveChatBoard({
     }
 
     const messageContent = inputText.trim();
+    const userKey = currentUser ? currentUser.email : guestNickname;
+    const docId = userKey.replace(/\//g, "_");
+
+    // Check for swear words (Admin/Moderator/Bypassed accounts are exempt)
+    if (hasSwear(messageContent, censoredWords) && !isModeratorOrAdmin) {
+      const currentWarnings = modStatus?.warnings || 0;
+      const nextWarnings = currentWarnings + 1;
+      const docRef = doc(db, "moderation", docId);
+
+      if (nextWarnings === 1) {
+        // First offense: Warning
+        try {
+          await setDoc(docRef, {
+            warnings: 1,
+            mutedUntil: null,
+            banned: false,
+            username: senderName,
+            email: currentUser ? currentUser.email : "Guest",
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          await addDoc(collection(db, "chats"), {
+            user: lang === "TR" ? "SİSTEM" : "SYSTEM",
+            role: "system",
+            text: lang === "TR" 
+              ? `⚠️ @${senderName} argolu/küfürlü konuştuğu için uyarıldı! (Uyarı: 1/2). Lütfen temiz bir dil kullanın.` 
+              : `⚠️ @${senderName} has been warned for using profanity! (Warning: 1/2). Please keep the chat clean.`,
+            timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            createdAt: new Date().toISOString(),
+            isUser: false
+          });
+        } catch (err) {
+          console.error("Error setting warning:", err);
+        }
+      } else if (nextWarnings === 2) {
+        // Second offense: Mute for 5 minutes
+        const muteDurationMs = 5 * 60 * 1000;
+        const mutedUntilTime = new Date(Date.now() + muteDurationMs).toISOString();
+        try {
+          await setDoc(docRef, {
+            warnings: 2,
+            mutedUntil: mutedUntilTime,
+            banned: false,
+            username: senderName,
+            email: currentUser ? currentUser.email : "Guest",
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          await addDoc(collection(db, "chats"), {
+            user: lang === "TR" ? "SİSTEM" : "SYSTEM",
+            role: "system",
+            text: lang === "TR" 
+              ? `🔇 @${senderName} küfürlü konuşmaya devam ettiği için 5 dakika boyunca susturuldu!` 
+              : `🔇 @${senderName} has been muted for 5 minutes for continued profanity!`,
+            timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            createdAt: new Date().toISOString(),
+            isUser: false
+          });
+        } catch (err) {
+          console.error("Error setting mute:", err);
+        }
+      } else {
+        // Third offense: Permanent ban
+        try {
+          await setDoc(docRef, {
+            warnings: 3,
+            mutedUntil: null,
+            banned: true,
+            username: senderName,
+            email: currentUser ? currentUser.email : "Guest",
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+
+          await addDoc(collection(db, "chats"), {
+            user: lang === "TR" ? "SİSTEM" : "SYSTEM",
+            role: "system",
+            text: lang === "TR" 
+              ? `🚫 @${senderName} uyarılara uymadığı için sohbetten kalıcı olarak engellendi!` 
+              : `🚫 @${senderName} has been permanently banned from the chat for ignoring warnings!`,
+            timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+            createdAt: new Date().toISOString(),
+            isUser: false
+          });
+        } catch (err) {
+          console.error("Error setting ban:", err);
+        }
+      }
+
+      setInputText("");
+      return;
+    }
 
     try {
       await addDoc(collection(db, "chats"), {
@@ -898,6 +1074,12 @@ export default function LiveChatBoard({
   };
 
   const QUICK_EMOTES = ["🔥", "😂", "👑", "😮", "🎯", "GG", "⚔️", "👍", "❤️"];
+
+  const isBanned = modStatus?.banned === true;
+  const isMuted = modStatus?.mutedUntil ? new Date(modStatus.mutedUntil).getTime() > Date.now() : false;
+  const isAdmin = currentUser?.role === "admin" || testRole === "admin";
+  const isModerator = testRole === "moderator";
+  const canBypassPause = isAdmin || isModerator;
 
   return (
     <div className="w-full flex flex-col rounded-3xl border border-white/5 bg-[#0e0f17] overflow-hidden shadow-2xl h-[520px] lg:h-[630px] relative">
@@ -1720,8 +1902,9 @@ export default function LiveChatBoard({
           <div className="relative flex-1">
             <button
               type="button"
+              disabled={isBanned || isMuted || (isChatPaused && !canBypassPause)}
               onClick={() => setShowEmotePicker(!showEmotePicker)}
-              className={`absolute left-3 top-3 text-gray-500 hover:text-[#00e676] transition ${showEmotePicker ? "text-[#00e676]" : ""}`}
+              className={`absolute left-3 top-3 text-gray-500 hover:text-[#00e676] transition ${showEmotePicker ? "text-[#00e676]" : ""} ${isBanned || isMuted || (isChatPaused && !canBypassPause) ? "cursor-not-allowed opacity-50" : ""}`}
               title={lang === "TR" ? "İfade Seçici" : "Emote Picker"}
             >
               <Smile className="h-4 w-4" />
@@ -1730,21 +1913,33 @@ export default function LiveChatBoard({
               type="text"
               value={inputText}
               onChange={(e) => setInputText(e.target.value.slice(0, 100))}
-              disabled={slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin")}
+              disabled={isBanned || isMuted || (isChatPaused && !canBypassPause) || (slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin"))}
               placeholder={
-                slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin")
-                  ? (lang === "TR" ? `${slowCountdown}s saniye bekleyin...` : `Wait ${slowCountdown}s...`)
-                  : (currentUser 
-                      ? translations.kickSendMessage 
-                      : (lang === "TR" ? `${guestNickname} olarak yaz...` : `Chatting as ${guestNickname}...`))
+                isBanned
+                  ? (lang === "TR" ? "🔴 Sohbetten süresiz engellendiniz!" : "🔴 You are permanently banned!")
+                  : isMuted
+                    ? (lang === "TR" ? `⚠️ Susturuldunuz! Kalan: ${remainingMuteSeconds} sn` : `⚠️ Muted! Remaining: ${remainingMuteSeconds}s`)
+                    : isChatPaused && !canBypassPause
+                      ? (lang === "TR" ? "🔴 Sohbet yönetici tarafından donduruldu" : "🔴 Chat is frozen by administrators")
+                      : slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin")
+                        ? (lang === "TR" ? `${slowCountdown}s saniye bekleyin...` : `Wait ${slowCountdown}s...`)
+                        : (currentUser 
+                            ? translations.kickSendMessage 
+                            : (lang === "TR" ? `${guestNickname} olarak yaz...` : `Chatting as ${guestNickname}...`))
               }
               className={`w-full bg-[#11121d] border rounded-2xl pl-10 pr-12 py-2.5 text-xs text-white focus:outline-none focus:ring-0 transition ${
-                slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin")
-                  ? "border-red-500/30 text-gray-500" 
-                  : "border-white/5 focus:border-[#00e676]/40"
+                isBanned
+                  ? "border-red-600/50 text-red-400 bg-red-950/10"
+                  : isMuted
+                    ? "border-amber-600/50 text-amber-400 bg-amber-950/10"
+                    : isChatPaused && !canBypassPause
+                      ? "border-amber-600/30 text-amber-500 bg-amber-950/5 cursor-not-allowed font-semibold"
+                      : slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin")
+                        ? "border-red-500/30 text-gray-500" 
+                        : "border-white/5 focus:border-[#00e676]/40"
               }`}
             />
-            {inputText.length > 0 && (
+            {inputText.length > 0 && !isBanned && !isMuted && !(isChatPaused && !canBypassPause) && (
               <span className="absolute right-3 top-3.5 text-[10px] text-gray-500 font-mono">
                 {100 - inputText.length}
               </span>
@@ -1752,9 +1947,9 @@ export default function LiveChatBoard({
           </div>
           <button
             type="submit"
-            disabled={!inputText.trim() || (slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin"))}
+            disabled={isBanned || isMuted || (isChatPaused && !canBypassPause) || !inputText.trim() || (slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin"))}
             className={`px-3 py-2.5 rounded-2xl font-bold flex items-center justify-center transition shrink-0 ${
-              inputText.trim() && !(slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin"))
+              inputText.trim() && !isBanned && !isMuted && !(isChatPaused && !canBypassPause) && !(slowMode && slowCountdown > 0 && !(currentUser?.role === "admin" || testRole === "admin"))
                 ? "bg-[#00e676] hover:bg-[#00c862] text-black"
                 : "bg-gray-800 text-gray-600 cursor-not-allowed"
             }`}

@@ -20,7 +20,7 @@ import { TRANSLATIONS, PLAYLISTS, SYSTEM_SPECS, DEFAULT_GIVEAWAYS } from "./data
 import { CrosshairItem, PlaylistItem, SpecItem, Announcement } from "./types";
 import AnnouncementSection from "./components/AnnouncementSection";
 import { db } from "./firebase";
-import { doc, setDoc, onSnapshot } from "firebase/firestore";
+import { doc, setDoc, onSnapshot, increment } from "firebase/firestore";
 
 const DEFAULT_PROFILE: UserProfile = {
   siteName: "İnan",
@@ -643,11 +643,7 @@ export default function App() {
     const hasVisited = localStorage.getItem("weew_has_visited");
     if (!hasVisited) {
       localStorage.setItem("weew_has_visited", "true");
-      setVisitorCount(prev => {
-        const next = prev + 1;
-        localStorage.setItem("weew_visitor_count", next.toString());
-        return next;
-      });
+      updateConfigDoc({ visitorCount: increment(1) });
     }
   }, []);
   
