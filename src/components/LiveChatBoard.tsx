@@ -174,6 +174,17 @@ export default function LiveChatBoard({
     ];
   });
 
+  // Persistent guest ID to track bans/mutes reliably
+  const [guestId] = useState<string>(() => {
+    let id = localStorage.getItem("weew_guest_id");
+    if (!id) {
+      const randId = Math.random().toString(36).substring(2, 11);
+      id = `guest_${randId}`;
+      localStorage.setItem("weew_guest_id", id);
+    }
+    return id;
+  });
+
   // Custom guest identity
   const [guestNickname, setGuestNickname] = useState<string>(() => {
     const saved = localStorage.getItem("weew_kick_guest_nick");
@@ -463,7 +474,7 @@ export default function LiveChatBoard({
 
   // Subscribe to this user's moderation status in Firestore
   useEffect(() => {
-    const userKey = currentUser ? currentUser.email : guestNickname;
+    const userKey = currentUser ? currentUser.email : guestId;
     const docId = userKey.replace(/\//g, "_");
     const docRef = doc(db, "moderation", docId);
     
@@ -483,7 +494,7 @@ export default function LiveChatBoard({
     });
 
     return () => unsubscribe();
-  }, [currentUser, guestNickname]);
+  }, [currentUser, guestId]);
 
   // Handle active mute timer countdown
   useEffect(() => {
@@ -785,7 +796,7 @@ export default function LiveChatBoard({
     }
 
     const messageContent = inputText.trim();
-    const userKey = currentUser ? currentUser.email : guestNickname;
+    const userKey = currentUser ? currentUser.email : guestId;
     const docId = userKey.replace(/\//g, "_");
 
     // Check for swear words (Admin/Moderator/Bypassed accounts are exempt)
@@ -907,6 +918,17 @@ export default function LiveChatBoard({
 
   // Quick reaction button triggered by user
   const sendReaction = (emoji: string) => {
+    const isAdmin = currentUser?.role === "admin" || testRole === "admin";
+    const isModerator = testRole === "moderator";
+    const canBypassPause = isAdmin || isModerator;
+
+    const isUserBanned = modStatus?.banned === true;
+    const isUserMuted = modStatus?.mutedUntil ? new Date(modStatus.mutedUntil).getTime() > Date.now() : false;
+
+    if (isUserBanned || isUserMuted || (isChatPaused && !canBypassPause)) {
+      return; // Silently ignore reactions if user is penalized or chat is paused
+    }
+
     const id = reactionIdCounter.current++;
     const left = 15 + Math.random() * 70; // randomize floating path horizontally
     setReactions((prev) => [...prev, { id, char: emoji, left }]);
@@ -928,8 +950,33 @@ export default function LiveChatBoard({
   };
 
   // Quick Direct Emote sender
-  const sendDirectEmote = (emoji: string) => {
+  const sendDirectEmote = async (emoji: string) => {
     const isAdmin = currentUser?.role === "admin" || testRole === "admin";
+    const isModerator = testRole === "moderator";
+    const canBypassPause = isAdmin || isModerator;
+
+    // Check if chat is paused globally
+    if (isChatPaused && !canBypassPause) {
+      alert(lang === "TR" ? "Sohbet şu anda yöneticiler tarafından donduruldu!" : "Chat is currently paused by administrators!");
+      return;
+    }
+
+    // Check if banned or muted
+    const isUserBanned = modStatus?.banned === true;
+    const isUserMuted = modStatus?.mutedUntil ? new Date(modStatus.mutedUntil).getTime() > Date.now() : false;
+
+    if (isUserBanned) {
+      alert(lang === "TR" ? "Cezalı olduğunuz için mesaj gönderemezsiniz!" : "You cannot send messages because you are currently penalized!");
+      return;
+    }
+
+    if (isUserMuted) {
+      const remainingMs = new Date(modStatus!.mutedUntil!).getTime() - Date.now();
+      const remainingSecs = Math.max(0, Math.ceil(remainingMs / 1000));
+      alert(lang === "TR" ? `Konuşma yasağınız var! Kalan süre: ${remainingSecs} saniye` : `You are muted! Remaining: ${remainingSecs} seconds`);
+      return;
+    }
+
     if (slowMode && slowCountdown > 0 && !isAdmin) return;
     
     const now = new Date();
@@ -944,17 +991,20 @@ export default function LiveChatBoard({
       senderName = currentUser.name;
     }
 
-    const emoteMsg: ChatMessage = {
-      id: `user-emote-${Date.now()}-${Math.random()}`,
-      user: senderName,
-      role: senderRole,
-      text: emoji,
-      timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-      isUser: true,
-      ...(senderRole === "admin" ? { adminBadgeColor } : {})
-    };
+    try {
+      await addDoc(collection(db, "chats"), {
+        user: senderName,
+        role: senderRole,
+        text: emoji,
+        timestamp: now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        isUser: true,
+        createdAt: new Date().toISOString(),
+        ...(senderRole === "admin" ? { adminBadgeColor } : {})
+      });
+    } catch (err) {
+      console.error("Error sending emote:", err);
+    }
 
-    setMessages((prev) => [...prev.slice(-79), emoteMsg]);
     setIsAutoScroll(true);
 
     if (audioEnabled) {
@@ -976,6 +1026,16 @@ export default function LiveChatBoard({
   // Guest name update handler
   const handleSaveNickname = (e: React.FormEvent) => {
     e.preventDefault();
+    const isUserBanned = modStatus?.banned === true;
+    const isUserMuted = modStatus?.mutedUntil ? new Date(modStatus.mutedUntil).getTime() > Date.now() : false;
+
+    if (isUserBanned || isUserMuted) {
+      alert(lang === "TR" 
+        ? "Cezalı olduğunuz için rumuz değiştiremezsiniz!" 
+        : "You cannot change your nickname because you are currently penalized!");
+      return;
+    }
+
     if (tempNick.trim() && tempNick.length >= 3 && tempNick.length <= 15) {
       const sanitized = tempNick.trim();
       setGuestNickname(sanitized);
@@ -1782,8 +1842,11 @@ export default function LiveChatBoard({
           {QUICK_EMOTES.map((emote) => (
             <button
               key={emote}
+              disabled={isBanned || isMuted || (isChatPaused && !canBypassPause)}
               onClick={() => sendDirectEmote(emote)}
-              className="text-sm px-1.5 py-0.5 rounded-md hover:bg-white/10 active:scale-95 transition"
+              className={`text-sm px-1.5 py-0.5 rounded-md hover:bg-white/10 active:scale-95 transition ${
+                isBanned || isMuted || (isChatPaused && !canBypassPause) ? "cursor-not-allowed opacity-30 hover:bg-transparent" : ""
+              }`}
               title={`Send ${emote}`}
             >
               {emote}
@@ -1793,8 +1856,13 @@ export default function LiveChatBoard({
         
         {/* Heart Tap effect trigger */}
         <button
+          disabled={isBanned || isMuted || (isChatPaused && !canBypassPause)}
           onClick={() => sendReaction("❤️")}
-          className="text-xs bg-red-500/10 hover:bg-red-500/20 text-red-500 p-1 rounded-md transition active:scale-90"
+          className={`text-xs p-1 rounded-md transition active:scale-90 ${
+            isBanned || isMuted || (isChatPaused && !canBypassPause)
+              ? "bg-gray-500/10 text-gray-500 cursor-not-allowed opacity-30"
+              : "bg-red-500/10 hover:bg-red-500/20 text-red-500"
+          }`}
           title={lang === "TR" ? "Sohbete kalp gönder!" : "Send hearts!"}
         >
           ❤️
