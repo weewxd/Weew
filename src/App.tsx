@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Bell, BellOff, X, ExternalLink, Copy, Check } from "lucide-react";
+import { Bell, BellOff, X, ExternalLink, Copy, Check, Gamepad2 } from "lucide-react";
 import Header from "./components/Header";
 import HeroSection from "./components/HeroSection";
 import SocialGrid from "./components/SocialGrid";
@@ -86,6 +86,7 @@ export default function App() {
   const [activeSection, setActiveSection] = useState("home");
 
   const lastReceivedConfig = useRef<string>("");
+  const [hasLoadedConfig, setHasLoadedConfig] = useState(false);
 
   const updateConfigDoc = async (updates: any) => {
     try {
@@ -108,19 +109,58 @@ export default function App() {
         });
         lastReceivedConfig.current = serialized;
 
-        if (data.profile !== undefined) setProfile(data.profile);
-        if (data.isStreamLive !== undefined) setIsStreamLive(data.isStreamLive);
-        if (data.streamCategory !== undefined) setStreamCategory(data.streamCategory);
-        if (data.streamTitle !== undefined) setStreamTitle(data.streamTitle);
-        if (data.streamViewers !== undefined) setStreamViewers(data.streamViewers);
-        if (data.kickApiEnabled !== undefined) setKickApiEnabled(data.kickApiEnabled);
-        if (data.cs2Settings !== undefined) setCs2Settings(data.cs2Settings);
-        if (data.crosshairs !== undefined) setCrosshairs(data.crosshairs);
-        if (data.playlists !== undefined) setPlaylists(data.playlists);
-        if (data.systemSpecs !== undefined) setSystemSpecs(data.systemSpecs);
-        if (data.announcements !== undefined) setAnnouncements(data.announcements);
-        if (data.isRegistrationDisabled !== undefined) setIsRegistrationDisabled(data.isRegistrationDisabled);
-        if (data.visitorCount !== undefined) setVisitorCount(data.visitorCount);
+        if (data.profile !== undefined) {
+          setProfile(data.profile);
+          localStorage.setItem("weew_user_profile", JSON.stringify(data.profile));
+        }
+        if (data.isStreamLive !== undefined) {
+          setIsStreamLive(data.isStreamLive);
+          localStorage.setItem("weew_is_stream_live", data.isStreamLive ? "true" : "false");
+        }
+        if (data.streamCategory !== undefined) {
+          setStreamCategory(data.streamCategory);
+          localStorage.setItem("weew_stream_category", data.streamCategory);
+        }
+        if (data.streamTitle !== undefined) {
+          setStreamTitle(data.streamTitle);
+          localStorage.setItem("weew_stream_title", data.streamTitle);
+        }
+        if (data.streamViewers !== undefined) {
+          setStreamViewers(data.streamViewers);
+          localStorage.setItem("weew_stream_viewers", data.streamViewers);
+        }
+        if (data.kickApiEnabled !== undefined) {
+          setKickApiEnabled(data.kickApiEnabled);
+          localStorage.setItem("weew_kick_api_enabled", data.kickApiEnabled ? "true" : "false");
+        }
+        if (data.cs2Settings !== undefined) {
+          setCs2Settings(data.cs2Settings);
+          localStorage.setItem("weew_cs2_settings", JSON.stringify(data.cs2Settings));
+        }
+        if (data.crosshairs !== undefined) {
+          setCrosshairs(data.crosshairs);
+          localStorage.setItem("weew_crosshairs", JSON.stringify(data.crosshairs));
+        }
+        if (data.playlists !== undefined) {
+          setPlaylists(data.playlists);
+          localStorage.setItem("weew_playlists", JSON.stringify(data.playlists));
+        }
+        if (data.systemSpecs !== undefined) {
+          setSystemSpecs(data.systemSpecs);
+          localStorage.setItem("weew_system_specs", JSON.stringify(data.systemSpecs));
+        }
+        if (data.announcements !== undefined) {
+          setAnnouncements(data.announcements);
+          localStorage.setItem("weew_announcements", JSON.stringify(data.announcements));
+        }
+        if (data.isRegistrationDisabled !== undefined) {
+          setIsRegistrationDisabled(data.isRegistrationDisabled);
+          localStorage.setItem("weew_registration_disabled", data.isRegistrationDisabled ? "true" : "false");
+        }
+        if (data.visitorCount !== undefined) {
+          setVisitorCount(data.visitorCount);
+          localStorage.setItem("weew_visitor_count", data.visitorCount.toString());
+        }
 
         if (data.giveaways !== undefined) {
           const localGiveawaysStr = localStorage.getItem("weew_giveaways") || "[]";
@@ -186,8 +226,15 @@ export default function App() {
           giveaways: DEFAULT_GIVEAWAYS,
           activeSpinTrigger: null
         };
-        setDoc(docRef, initialData).catch(err => console.error("Error seeding config:", err));
+        setDoc(docRef, initialData)
+          .then(() => setHasLoadedConfig(true))
+          .catch(err => {
+            console.error("Error seeding config:", err);
+            setHasLoadedConfig(true);
+          });
+        return;
       }
+      setHasLoadedConfig(true);
     });
 
     return () => unsubscribe();
@@ -804,6 +851,71 @@ export default function App() {
       className="min-h-screen bg-[#08090d] text-gray-100 font-sans grid-bg select-none flex flex-col justify-between overflow-x-hidden w-full"
       id="app-root-container"
     >
+      {/* Global Config Synchronization Overlay Loader */}
+      <AnimatePresence>
+        {!hasLoadedConfig && (
+          <motion.div
+            key="global-loader"
+            initial={{ opacity: 1 }}
+            exit={{ opacity: 0, transition: { duration: 0.4, ease: "easeInOut" } }}
+            className="fixed inset-0 z-[10000] flex flex-col items-center justify-center bg-[#08090d] select-none pointer-events-auto"
+            id="global-portal-loader"
+          >
+            {/* Ambient Background Glows */}
+            <div className="absolute top-1/4 left-1/2 -translate-x-1/2 h-96 w-96 rounded-full bg-[#00e676]/5 blur-[120px] pointer-events-none" />
+            <div className="absolute bottom-1/4 left-1/2 -translate-x-1/2 h-96 w-96 rounded-full bg-emerald-500/5 blur-[120px] pointer-events-none" />
+
+            <div className="relative flex flex-col items-center space-y-8 text-center max-w-xs px-4">
+              {/* Outer Pulsing Glow Ring */}
+              <div className="relative flex items-center justify-center">
+                <motion.div 
+                  className="absolute h-24 w-24 rounded-full border border-[#00e676]/30"
+                  animate={{ scale: [1, 1.4, 1], opacity: [0.6, 0, 0.6] }}
+                  transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+                />
+                <motion.div 
+                  className="absolute h-24 w-24 rounded-full border border-emerald-500/20"
+                  animate={{ scale: [1.2, 1.6, 1.2], opacity: [0.4, 0, 0.4] }}
+                  transition={{ repeat: Infinity, duration: 2, ease: "easeInOut", delay: 0.5 }}
+                />
+                
+                {/* Glowing Core Icon */}
+                <div className="relative h-16 w-16 rounded-2xl bg-[#0d111b] border-2 border-[#00e676]/60 flex items-center justify-center shadow-[0_0_30px_rgba(0,230,118,0.25)]">
+                  <Gamepad2 className="h-8 w-8 text-[#00e676] animate-pulse" />
+                </div>
+              </div>
+
+              {/* Loader Text with Pulse */}
+              <div className="space-y-2">
+                <h2 className="font-display text-lg font-black tracking-widest text-white uppercase">
+                  WEEW PORTAL
+                </h2>
+                <div className="flex items-center justify-center gap-1.5 text-xs text-gray-500 font-mono tracking-wider">
+                  <span className="h-1.5 w-1.5 rounded-full bg-[#00e676] animate-ping" />
+                  <span>{lang === "TR" ? "SENKRONİZE EDİLİYOR..." : "SYNCHRONIZING..."}</span>
+                </div>
+              </div>
+
+              {/* Progress Line */}
+              <div className="w-48 h-1 bg-white/5 rounded-full overflow-hidden">
+                <motion.div 
+                  className="h-full bg-gradient-to-r from-emerald-500 to-[#00e676] rounded-full"
+                  animate={{ 
+                    x: ["-100%", "100%"] 
+                  }}
+                  transition={{ 
+                    repeat: Infinity, 
+                    duration: 1.5, 
+                    ease: "easeInOut" 
+                  }}
+                  style={{ width: "50%" }}
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Sticky Navigation Header with Auth Bindings */}
       <Header 
         lang={lang} 
