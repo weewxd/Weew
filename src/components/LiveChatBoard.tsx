@@ -1156,7 +1156,7 @@ export default function LiveChatBoard({
     }
 
     const changeCount = modStatus?.nickChangeCount || 0;
-    if (changeCount >= 2) {
+    if (changeCount >= 1) {
       alert(lang === "TR"
         ? "Maksimum direkt rumuz değiştirme limitine ulaştınız. Lütfen onay talebi gönderin!"
         : "You have reached the maximum direct nickname change limit. Please send an approval request!"
@@ -1860,7 +1860,7 @@ export default function LiveChatBoard({
               {lang === "TR" ? "Rumuz (Nickname) Değiştir" : "Edit Guest Nickname"}
             </span>
             <span className="text-[10px] text-gray-500 font-mono">
-              {lang === "TR" ? `Limit: ${modStatus?.nickChangeCount || 0}/2` : `Limit: ${modStatus?.nickChangeCount || 0}/2`}
+              {lang === "TR" ? `Limit: ${modStatus?.nickChangeCount || 0}/1` : `Limit: ${modStatus?.nickChangeCount || 0}/1`}
             </span>
           </h4>
 
@@ -1899,10 +1899,10 @@ export default function LiveChatBoard({
           ) : (
             <form onSubmit={handleSaveNickname} className="space-y-3">
               <p className="text-[10px] text-gray-400">
-                {(modStatus?.nickChangeCount || 0) >= 2
+                {(modStatus?.nickChangeCount || 0) >= 1
                   ? (lang === "TR"
-                      ? "Maksimum direkt değişim sınırına (2) ulaştınız. Yeni bir ad istemek için yöneticilere onay gönderin!"
-                      : "You reached the maximum direct change limit (2). Send an approval request to admins to request a new name!")
+                      ? "Maksimum direkt değişim sınırına (1) ulaştınız. Yeni bir ad istemek için yöneticilere onay gönderin!"
+                      : "You reached the maximum direct change limit (1). Send an approval request to admins to request a new name!")
                   : (lang === "TR" 
                       ? "Sohbette görünecek adınızı belirleyin (3-15 karakter)." 
                       : "Choose how you will appear in the chat stream (3-15 chars).")}
@@ -1916,7 +1916,7 @@ export default function LiveChatBoard({
                   className="flex-1 bg-[#090a10] border border-white/5 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00e676]/50"
                   autoFocus
                 />
-                {(modStatus?.nickChangeCount || 0) >= 2 ? (
+                {(modStatus?.nickChangeCount || 0) >= 1 ? (
                   <button
                     type="button"
                     onClick={async () => {
