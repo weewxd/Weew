@@ -6,7 +6,7 @@ import {
 import { TranslationDict } from "../types";
 import { UserAccount } from "./AuthModal";
 import { db } from "../firebase";
-import { collection, addDoc, query, orderBy, limit, onSnapshot, doc, deleteDoc, getDocs, writeBatch, setDoc } from "firebase/firestore";
+import { collection, addDoc, query, orderBy, limit, onSnapshot, doc, deleteDoc, getDocs, writeBatch, setDoc, where } from "firebase/firestore";
 
 interface LiveChatBoardProps {
   translations: TranslationDict;
@@ -198,7 +198,28 @@ export default function LiveChatBoard({
     warnings: number;
     mutedUntil: string | null;
     banned: boolean;
+    nickChangeCount?: number;
+    nickname?: string;
   } | null>(null);
+
+  const [activeRequest, setActiveRequest] = useState<{
+    id: string;
+    userKey: string;
+    currentNickname: string;
+    requestedNickname: string;
+    status: string;
+    createdAt: string;
+  } | null>(null);
+
+  const [showAdminNickRequests, setShowAdminNickRequests] = useState(false);
+  const [adminRequests, setAdminRequests] = useState<{
+    id: string;
+    userKey: string;
+    currentNickname: string;
+    requestedNickname: string;
+    status: string;
+    createdAt: string;
+  }[]>([]);
 
   const [remainingMuteSeconds, setRemainingMuteSeconds] = useState(0);
 
@@ -485,9 +506,17 @@ export default function LiveChatBoard({
           warnings: data.warnings || 0,
           mutedUntil: data.mutedUntil || null,
           banned: !!data.banned,
+          nickChangeCount: data.nickChangeCount || 0,
+          nickname: data.nickname || "",
         });
       } else {
-        setModStatus(null);
+        setModStatus({
+          warnings: 0,
+          mutedUntil: null,
+          banned: false,
+          nickChangeCount: 0,
+          nickname: "",
+        });
       }
     }, (error) => {
       console.error("Error fetching moderation status:", error);
@@ -495,6 +524,57 @@ export default function LiveChatBoard({
 
     return () => unsubscribe();
   }, [currentUser, guestId]);
+
+  // Subscribe to user's nickname requests in real-time
+  useEffect(() => {
+    const userKey = currentUser ? currentUser.email : guestId;
+    const q = query(
+      collection(db, "nickname_requests"),
+      where("userKey", "==", userKey)
+    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let pendingReq: any = null;
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        const reqId = docSnap.id;
+        if (data.status === "pending") {
+          pendingReq = { id: reqId, ...data };
+        } else if (data.status === "approved") {
+          // Apply approved nickname!
+          const approvedName = data.requestedNickname;
+          setGuestNickname(approvedName);
+          localStorage.setItem("weew_kick_guest_nick", approvedName);
+          
+          alert(lang === "TR" 
+            ? `Tebrikler! Kullanıcı adı değişikliği talebiniz onaylandı: @${approvedName}`
+            : `Congratulations! Your nickname change request has been approved: @${approvedName}`
+          );
+
+          // Mark as applied so we don't trigger again
+          setDoc(doc(db, "nickname_requests", reqId), { status: "applied" }, { merge: true });
+          
+          // Increment change count in moderation
+          const docId = userKey.replace(/\//g, "_");
+          setDoc(doc(db, "moderation", docId), { 
+            nickChangeCount: (modStatus?.nickChangeCount || 0) + 1,
+            nickname: approvedName
+          }, { merge: true });
+        } else if (data.status === "rejected") {
+          alert(lang === "TR"
+            ? `Kullanıcı adı talebiniz (${data.requestedNickname}) yöneticiler tarafından reddedildi.`
+            : `Your nickname request (${data.requestedNickname}) was rejected by administrators.`
+          );
+          // Mark as rejected_acknowledged
+          setDoc(doc(db, "nickname_requests", reqId), { status: "rejected_acknowledged" }, { merge: true });
+        }
+      });
+      setActiveRequest(pendingReq);
+    }, (error) => {
+      console.error("Error subscribing to nickname requests:", error);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser, guestId, modStatus?.nickChangeCount, lang]);
 
   // Handle active mute timer countdown
   useEffect(() => {
@@ -511,7 +591,33 @@ export default function LiveChatBoard({
     return () => clearInterval(interval);
   }, [modStatus?.mutedUntil]);
 
-  // Synchronize slowMode and isChatPaused settings with Firestore in real-time
+  // Subscribe to all pending nickname requests (Admin only)
+  useEffect(() => {
+    const isAdmin = currentUser?.role === "admin" || testRole === "admin";
+    if (!isAdmin) {
+      setAdminRequests([]);
+      return;
+    }
+
+    const q = query(
+      collection(db, "nickname_requests"),
+      where("status", "==", "pending")
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const requestsList: any[] = [];
+      snapshot.forEach((docSnap) => {
+        requestsList.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setAdminRequests(requestsList);
+    }, (error) => {
+      console.error("Error subscribing to admin nickname requests:", error);
+    });
+
+    return () => unsubscribe();
+  }, [currentUser, testRole]);
+
+  // Synchronize slowMode, isChatPaused, and pinnedMessage settings with Firestore in real-time
   useEffect(() => {
     const docRef = doc(db, "config", "portal");
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
@@ -524,6 +630,14 @@ export default function LiveChatBoard({
         if (data.slowMode !== undefined) {
           setSlowMode(data.slowMode);
           localStorage.setItem("weew_chat_slow_mode", data.slowMode ? "true" : "false");
+        }
+        if (data.pinnedMessage !== undefined) {
+          setPinnedMessage(data.pinnedMessage);
+          if (data.pinnedMessage) {
+            localStorage.setItem("weew_chat_pinned", data.pinnedMessage);
+          } else {
+            localStorage.removeItem("weew_chat_pinned");
+          }
         }
       }
     });
@@ -1013,18 +1127,23 @@ export default function LiveChatBoard({
   };
 
   // Pinned message save handler
-  const handleSavePin = (e: React.FormEvent) => {
+  const handleSavePin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (tempPin.trim()) {
       const sanitized = tempPin.trim();
       setPinnedMessage(sanitized);
       localStorage.setItem("weew_chat_pinned", sanitized);
       setIsEditingPin(false);
+      try {
+        await setDoc(doc(db, "config", "portal"), { pinnedMessage: sanitized }, { merge: true });
+      } catch (err) {
+        console.error("Error saving pinned message to Firestore:", err);
+      }
     }
   };
 
   // Guest name update handler
-  const handleSaveNickname = (e: React.FormEvent) => {
+  const handleSaveNickname = async (e: React.FormEvent) => {
     e.preventDefault();
     const isUserBanned = modStatus?.banned === true;
     const isUserMuted = modStatus?.mutedUntil ? new Date(modStatus.mutedUntil).getTime() > Date.now() : false;
@@ -1036,11 +1155,31 @@ export default function LiveChatBoard({
       return;
     }
 
+    const changeCount = modStatus?.nickChangeCount || 0;
+    if (changeCount >= 2) {
+      alert(lang === "TR"
+        ? "Maksimum direkt rumuz değiştirme limitine ulaştınız. Lütfen onay talebi gönderin!"
+        : "You have reached the maximum direct nickname change limit. Please send an approval request!"
+      );
+      return;
+    }
+
     if (tempNick.trim() && tempNick.length >= 3 && tempNick.length <= 15) {
       const sanitized = tempNick.trim();
       setGuestNickname(sanitized);
       localStorage.setItem("weew_kick_guest_nick", sanitized);
       setShowNickSettings(false);
+
+      try {
+        const userKey = currentUser ? currentUser.email : guestId;
+        const docId = userKey.replace(/\//g, "_");
+        await setDoc(doc(db, "moderation", docId), {
+          nickChangeCount: changeCount + 1,
+          nickname: sanitized
+        }, { merge: true });
+      } catch (err) {
+        console.error("Error updating nickname count in Firestore:", err);
+      }
     }
   };
 
@@ -1609,6 +1748,19 @@ export default function LiveChatBoard({
               <span>{lang === "TR" ? "Yavaş Mod (3s)" : "Slow Mode (3s)"}</span>
             </label>
             <button 
+              onClick={() => setShowAdminNickRequests(!showAdminNickRequests)} 
+              className={`font-bold uppercase tracking-wider text-[10px] flex items-center gap-1 transition ${
+                showAdminNickRequests ? "text-yellow-400" : "text-[#00e676] hover:text-[#00c862]"
+              }`}
+            >
+              [ {lang === "TR" ? "Rumuz İstekleri" : "Nick Requests"} 
+              {adminRequests.length > 0 && (
+                <span className="ml-1 px-1 py-0.2 bg-red-500 text-white rounded-full text-[9px] animate-pulse">
+                  {adminRequests.length}
+                </span>
+              )} ]
+            </button>
+            <button 
               onClick={handleClearChat} 
               className="text-red-400 hover:text-red-300 font-bold uppercase tracking-wider text-[10px]"
             >
@@ -1618,34 +1770,208 @@ export default function LiveChatBoard({
         </div>
       )}
 
-      {/* Guest Nickname Settings Popover */}
-      {showNickSettings && (
-        <form onSubmit={handleSaveNickname} className="absolute top-12 left-2 right-2 p-4 bg-[#11121d] border border-white/10 rounded-2xl shadow-2xl z-40 animate-fade-in">
-          <h4 className="text-xs font-bold text-white mb-2 flex items-center gap-1.5 uppercase">
-            <Settings className="h-3.5 w-3.5 text-[#00e676]" />
-            {lang === "TR" ? "Rumuz (Nickname) Değiştir" : "Edit Guest Nickname"}
+      {/* Admin Nickname Requests Modal Overlay */}
+      {showAdminNickRequests && currentUser?.role === "admin" && (
+        <div className="absolute top-12 left-2 right-2 p-4 bg-[#11121d] border border-white/10 rounded-2xl shadow-2xl z-40 animate-fade-in text-xs text-gray-300 max-h-[80%] flex flex-col">
+          <h4 className="text-xs font-bold text-white mb-2 flex items-center justify-between uppercase">
+            <span className="flex items-center gap-1.5">
+              <Crown className="h-3.5 w-3.5 text-purple-400" />
+              {lang === "TR" ? "Gelen Kullanıcı Adı İstekleri" : "Incoming Nickname Requests"}
+            </span>
+            <button
+              onClick={() => setShowAdminNickRequests(false)}
+              className="text-gray-500 hover:text-white text-xs font-bold font-mono"
+            >
+              x
+            </button>
           </h4>
           <p className="text-[10px] text-gray-400 mb-3">
-            {lang === "TR" 
-              ? "Sohbette görünecek adınızı belirleyin (3-15 karakter)." 
-              : "Choose how you will appear in the chat stream (3-15 chars)."}
+            {lang === "TR"
+              ? "Kullanıcıların talep ettiği yeni takma adları onaylayın veya reddedin."
+              : "Approve or reject nickname change requests from guests."}
           </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={tempNick}
-              onChange={(e) => setTempNick(e.target.value.slice(0, 15))}
-              placeholder="Nickname"
-              className="flex-1 bg-[#090a10] border border-white/5 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00e676]/50"
-              autoFocus
-            />
-            <button
-              type="submit"
-              className="bg-[#00e676] hover:bg-[#00c862] text-black text-xs font-bold px-4 py-1.5 rounded-xl transition"
-            >
-              {lang === "TR" ? "Kaydet" : "Save"}
-            </button>
+
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+            {adminRequests.length === 0 ? (
+              <div className="text-center py-6 text-gray-500 text-[11px]">
+                {lang === "TR" ? "Bekleyen onay isteği bulunmuyor." : "No pending approval requests."}
+              </div>
+            ) : (
+              adminRequests.map((req) => (
+                <div key={req.id} className="p-2.5 bg-black/40 border border-white/5 rounded-xl flex flex-col gap-2 animate-fade-in">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] text-gray-400 font-mono break-all max-w-[150px]">
+                      ID: {req.userKey.slice(0, 12)}...
+                    </span>
+                    <span className="text-[9px] text-gray-500">
+                      {req.createdAt ? new Date(req.createdAt).toLocaleTimeString() : ""}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-1 text-[11px]">
+                    <div className="flex flex-col">
+                      <span className="text-gray-500">{lang === "TR" ? "Mevcut:" : "Current:"}</span>
+                      <span className="text-white font-medium">@{req.currentNickname}</span>
+                    </div>
+                    <span className="text-[#00e676] font-bold">➜</span>
+                    <div className="flex flex-col text-right">
+                      <span className="text-gray-500">{lang === "TR" ? "İstenen:" : "Requested:"}</span>
+                      <span className="text-yellow-400 font-extrabold">@{req.requestedNickname}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-1">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await setDoc(doc(db, "nickname_requests", req.id), { status: "approved" }, { merge: true });
+                        } catch (err) {
+                          console.error("Error approving request:", err);
+                        }
+                      }}
+                      className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-black font-extrabold text-[10px] py-1 rounded-lg transition"
+                    >
+                      {lang === "TR" ? "Onayla" : "Approve"}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await setDoc(doc(db, "nickname_requests", req.id), { status: "rejected" }, { merge: true });
+                        } catch (err) {
+                          console.error("Error rejecting request:", err);
+                        }
+                      }}
+                      className="flex-1 bg-red-500/15 hover:bg-red-500/25 text-red-400 font-bold text-[10px] py-1 rounded-lg transition"
+                    >
+                      {lang === "TR" ? "Reddet" : "Reject"}
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
+        </div>
+      )}
+
+      {/* Guest Nickname Settings Popover */}
+      {showNickSettings && (
+        <div className="absolute top-12 left-2 right-2 p-4 bg-[#11121d] border border-white/10 rounded-2xl shadow-2xl z-40 animate-fade-in text-xs text-gray-300">
+          <h4 className="text-xs font-bold text-white mb-2 flex items-center justify-between gap-1.5 uppercase">
+            <span className="flex items-center gap-1.5">
+              <Settings className="h-3.5 w-3.5 text-[#00e676]" />
+              {lang === "TR" ? "Rumuz (Nickname) Değiştir" : "Edit Guest Nickname"}
+            </span>
+            <span className="text-[10px] text-gray-500 font-mono">
+              {lang === "TR" ? `Limit: ${modStatus?.nickChangeCount || 0}/2` : `Limit: ${modStatus?.nickChangeCount || 0}/2`}
+            </span>
+          </h4>
+
+          {/* If there is a pending request */}
+          {activeRequest ? (
+            <div className="space-y-3">
+              <p className="text-[10px] text-yellow-400 font-medium">
+                {lang === "TR"
+                  ? `Sohbet adı değişikliği onay bekliyor: "${activeRequest.requestedNickname}"`
+                  : `Nickname change request pending: "${activeRequest.requestedNickname}"`}
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  disabled
+                  value={activeRequest.requestedNickname}
+                  className="flex-1 bg-white/5 border border-white/5 rounded-xl px-3 py-1.5 text-xs text-gray-400 cursor-not-allowed"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (activeRequest?.id) {
+                      try {
+                        await deleteDoc(doc(db, "nickname_requests", activeRequest.id));
+                      } catch (err) {
+                        console.error("Error deleting request:", err);
+                      }
+                    }
+                  }}
+                  className="bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-bold px-3 py-1.5 rounded-xl transition"
+                >
+                  {lang === "TR" ? "İptal Et" : "Cancel"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={handleSaveNickname} className="space-y-3">
+              <p className="text-[10px] text-gray-400">
+                {(modStatus?.nickChangeCount || 0) >= 2
+                  ? (lang === "TR"
+                      ? "Maksimum direkt değişim sınırına (2) ulaştınız. Yeni bir ad istemek için yöneticilere onay gönderin!"
+                      : "You reached the maximum direct change limit (2). Send an approval request to admins to request a new name!")
+                  : (lang === "TR" 
+                      ? "Sohbette görünecek adınızı belirleyin (3-15 karakter)." 
+                      : "Choose how you will appear in the chat stream (3-15 chars).")}
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={tempNick}
+                  onChange={(e) => setTempNick(e.target.value.slice(0, 15))}
+                  placeholder="Nickname"
+                  className="flex-1 bg-[#090a10] border border-white/5 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#00e676]/50"
+                  autoFocus
+                />
+                {(modStatus?.nickChangeCount || 0) >= 2 ? (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const isUserBanned = modStatus?.banned === true;
+                      const isUserMuted = modStatus?.mutedUntil ? new Date(modStatus.mutedUntil).getTime() > Date.now() : false;
+
+                      if (isUserBanned || isUserMuted) {
+                        alert(lang === "TR" 
+                          ? "Cezalı olduğunuz için talep gönderemezsiniz!" 
+                          : "You cannot request because you are currently penalized!");
+                        return;
+                      }
+
+                      const sanitized = tempNick.trim();
+                      if (sanitized && sanitized.length >= 3 && sanitized.length <= 15) {
+                        if (sanitized === guestNickname) {
+                          alert(lang === "TR" ? "Lütfen şu anki adınızdan farklı bir ad giriniz!" : "Please enter a name different from your current one!");
+                          return;
+                        }
+                        try {
+                          const userKey = currentUser ? currentUser.email : guestId;
+                          await addDoc(collection(db, "nickname_requests"), {
+                            userKey,
+                            currentNickname: guestNickname,
+                            requestedNickname: sanitized,
+                            status: "pending",
+                            createdAt: new Date().toISOString()
+                          });
+                          alert(lang === "TR" 
+                            ? "Kullanıcı adı değiştirme talebiniz yöneticilere iletildi! Lütfen onay bekleyin."
+                            : "Your nickname change request has been sent to admins! Please await approval."
+                          );
+                        } catch (err) {
+                          console.error("Error creating request:", err);
+                        }
+                      } else {
+                        alert(lang === "TR" ? "Lütfen 3-15 karakter uzunluğunda geçerli bir ad girin!" : "Please enter a valid name 3-15 characters long!");
+                      }
+                    }}
+                    className="bg-yellow-500 hover:bg-yellow-600 text-black text-[11px] font-extrabold px-3 py-1.5 rounded-xl transition shrink-0"
+                  >
+                    {lang === "TR" ? "Onay İste" : "Request"}
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    className="bg-[#00e676] hover:bg-[#00c862] text-black text-xs font-bold px-4 py-1.5 rounded-xl transition shrink-0"
+                  >
+                    {lang === "TR" ? "Kaydet" : "Save"}
+                  </button>
+                )}
+              </div>
+            </form>
+          )}
+
           <button
             type="button"
             onClick={() => setShowNickSettings(false)}
@@ -1653,7 +1979,7 @@ export default function LiveChatBoard({
           >
             <span className="text-xs uppercase font-bold text-gray-400 hover:text-white">x</span>
           </button>
-        </form>
+        </div>
       )}
 
       {/* Pinned Message Banner */}
