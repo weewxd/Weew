@@ -21,7 +21,7 @@ async function startServer() {
   // API Route: Send newsletter
   app.post("/api/send-newsletter", async (req: express.Request, res: express.Response) => {
     try {
-      const { subject, title, content, targetLang } = req.body;
+      const { subject, title, content, targetLang, html } = req.body;
 
       if (!subject || !content) {
         return res.status(400).json({ success: false, error: "Subject and content are required" });
@@ -84,7 +84,7 @@ async function startServer() {
       }
 
       // Compose email body with beautiful Twitch/Gaming streamer bento style
-      const htmlBody = `
+      const defaultHtmlBody = `
         <div style="font-family: 'Inter', Helvetica, Arial, sans-serif; background-color: #0c0d16; color: #ffffff; padding: 30px 20px; max-width: 600px; margin: 0 auto; border-radius: 20px; border: 1px solid #1f2235; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
           <!-- Header -->
           <div style="text-align: center; margin-bottom: 30px; border-bottom: 1px solid #1f2235; padding-bottom: 20px;">
@@ -111,6 +111,8 @@ async function startServer() {
           </div>
         </div>
       `;
+
+      const htmlBody = html || defaultHtmlBody;
 
       // Send to all subscribers
       const mailOptions = {

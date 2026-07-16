@@ -253,6 +253,100 @@ export default function AdminPanelModal({
     message: string;
   } | null>(null);
 
+  // HTML Template options for email preview editor
+  const [newsletterTemplate, setNewsletterTemplate] = useState<"gaming_dark" | "neon_emerald" | "cyber_punk" | "classic_light">("gaming_dark");
+  const [newsletterAccentColor, setNewsletterAccentColor] = useState("#a855f7");
+  const [newsletterCtaText, setNewsletterCtaText] = useState("Portalı Ziyaret Et");
+  const [newsletterCtaUrl, setNewsletterCtaUrl] = useState("https://weew.portal");
+  const [newsletterHeaderImg, setNewsletterHeaderImg] = useState("https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=600&auto=format&fit=crop");
+  const [newsletterFooterNote, setNewsletterFooterNote] = useState("Bu bülteni Weew Portal abonesi olduğunuz için aldınız.");
+  const [previewDevice, setPreviewDevice] = useState<"desktop" | "mobile">("desktop");
+
+  const generateCustomEmailHtml = () => {
+    const accent = newsletterAccentColor || "#a855f7";
+    const bg = newsletterTemplate === "classic_light" ? "#f8fafc" : "#0c0d16";
+    const cardBg = newsletterTemplate === "classic_light" ? "#ffffff" : "#10111a";
+    const textColor = newsletterTemplate === "classic_light" ? "#0f172a" : "#ffffff";
+    const contentColor = newsletterTemplate === "classic_light" ? "#334155" : "#cbd5e1";
+    const borderColor = newsletterTemplate === "classic_light" ? "#e2e8f0" : "#1f2235";
+    
+    // Choose font family
+    const fontStack = newsletterTemplate === "cyber_punk" 
+      ? "'Courier New', Courier, monospace" 
+      : "'Inter', Helvetica, Arial, sans-serif";
+
+    // Build specific styles per template
+    let headerStyle = "";
+    let outerContainerStyle = `font-family: ${fontStack}; background-color: ${bg}; color: ${textColor}; padding: 30px 20px; max-width: 600px; margin: 0 auto; border-radius: 20px; border: 1px solid ${borderColor}; box-shadow: 0 10px 30px rgba(0,0,0,0.5);`;
+    let contentBoxStyle = `background-color: ${cardBg}; border-radius: 16px; border: 1px solid ${borderColor}; padding: 25px; margin-bottom: 30px; line-height: 1.6; color: ${contentColor}; font-size: 14px; white-space: pre-wrap;`;
+    let ctaButtonStyle = `background: ${accent}; color: #ffffff; padding: 12px 30px; border-radius: 12px; font-weight: bold; text-decoration: none; font-size: 13px; display: inline-block; box-shadow: 0 4px 15px ${accent}66;`;
+
+    if (newsletterTemplate === "gaming_dark") {
+      headerStyle = `text-align: center; margin-bottom: 25px; border-bottom: 1px solid ${borderColor}; padding-bottom: 20px;`;
+      ctaButtonStyle = `background: linear-gradient(135deg, ${accent} 0%, #4f46e5 100%); color: #ffffff; padding: 13px 32px; border-radius: 12px; font-weight: 800; text-decoration: none; font-size: 13px; display: inline-block; box-shadow: 0 5px 20px ${accent}66; border: 1px solid rgba(255,255,255,0.1);`;
+    } else if (newsletterTemplate === "neon_emerald") {
+      headerStyle = `text-align: left; margin-bottom: 25px; border-left: 4px solid ${accent}; padding-left: 15px;`;
+      outerContainerStyle += ` border-top: 5px solid ${accent};`;
+      ctaButtonStyle = `background-color: transparent; color: ${accent}; padding: 11px 28px; border-radius: 8px; font-weight: bold; text-decoration: none; font-size: 13px; display: inline-block; border: 2px solid ${accent}; text-transform: uppercase; letter-spacing: 1px;`;
+    } else if (newsletterTemplate === "cyber_punk") {
+      headerStyle = `text-align: center; margin-bottom: 25px; background-color: #ffe600; color: #000000; padding: 15px; clip-path: polygon(0% 0%, 100% 0%, 95% 100%, 5% 100%);`;
+      outerContainerStyle = `font-family: ${fontStack}; background-color: #000000; color: #ffe600; padding: 30px 20px; max-width: 600px; margin: 0 auto; border: 3px solid #ff007f;`;
+      contentBoxStyle = `background-color: #111111; border: 2px solid #00f0ff; padding: 25px; margin-bottom: 30px; line-height: 1.6; color: #ffffff; font-size: 14px; white-space: pre-wrap;`;
+      ctaButtonStyle = `background-color: #ff007f; color: #ffffff; padding: 12px 30px; font-weight: bold; text-decoration: none; font-size: 13px; display: inline-block; border-right: 4px solid #00f0ff; border-bottom: 4px solid #00f0ff; text-transform: uppercase;`;
+    } else if (newsletterTemplate === "classic_light") {
+      headerStyle = `text-align: center; margin-bottom: 35px; border-bottom: 2px solid ${borderColor}; padding-bottom: 25px;`;
+      outerContainerStyle = `font-family: ${fontStack}; background-color: ${bg}; color: ${textColor}; padding: 40px 30px; max-width: 600px; margin: 0 auto; border: 1px solid ${borderColor}; box-shadow: 0 4px 6px rgba(0,0,0,0.02);`;
+      contentBoxStyle = `background-color: ${cardBg}; padding: 10px 0; margin-bottom: 35px; line-height: 1.8; color: ${contentColor}; font-size: 15px; white-space: pre-wrap;`;
+      ctaButtonStyle = `background-color: #0f172a; color: #ffffff; padding: 12px 30px; border-radius: 6px; font-weight: 600; text-decoration: none; font-size: 14px; display: inline-block;`;
+    }
+
+    const headerImageHtml = newsletterHeaderImg 
+      ? `<div style="margin-bottom: 25px; border-radius: 12px; overflow: hidden; text-align: center;">
+           <img src="${newsletterHeaderImg}" alt="Header Image" style="max-width: 100%; height: auto; border-radius: 12px; display: block; margin: 0 auto;" />
+         </div>`
+      : "";
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${newsletterSubject || "Bülten"}</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+    body { margin: 0; padding: 0; background-color: ${newsletterTemplate === "classic_light" ? "#f1f5f9" : "#06070c"}; }
+  </style>
+</head>
+<body style="padding: 20px 10px; margin: 0;">
+  <div style="${outerContainerStyle}">
+    ${headerImageHtml}
+    
+    <!-- Header -->
+    <div style="${headerStyle}">
+      <span style="font-family: monospace; font-size: 11px; color: ${accent}; letter-spacing: 3px; font-weight: bold; text-transform: uppercase; display: block; margin-bottom: 5px;">// PORTAL BÜLTENİ</span>
+      <h1 style="color: ${newsletterTemplate === "cyber_punk" ? "#000000" : textColor}; font-size: 24px; font-weight: 800; margin: 0; letter-spacing: -0.5px;">${newsletterTitle || newsletterSubject || "Duyuru Başlığı"}</h1>
+    </div>
+    
+    <!-- Content -->
+    <div style="${contentBoxStyle}">${(newsletterContent || "E-posta içeriğini yazın ya da bir duyuru seçin...").replace(/\n/g, "<br/>")}</div>
+
+    <!-- CTA / Link -->
+    <div style="text-align: center; margin-bottom: 30px;">
+      <a href="${newsletterCtaUrl || 'https://weew.portal'}" style="${ctaButtonStyle}">
+        ${newsletterCtaText || 'Portalı Ziyaret Et'}
+      </a>
+    </div>
+
+    <!-- Footer -->
+    <div style="text-align: center; border-top: 1px solid ${borderColor}; padding-top: 20px; font-size: 11px; color: ${newsletterTemplate === "classic_light" ? "#94a3b8" : "#64748b"};">
+      <p style="margin: 0 0 10px 0;">${newsletterFooterNote || 'Bu bülteni Weew Portal abonesi olduğunuz için aldınız.'}</p>
+      <p style="margin: 0;">© 2026 Weew Portal. Tüm Hakları Saklıdır.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+  };
+
   useEffect(() => {
     if (activeSubTab !== "newsletter") return;
     const q = query(collection(db, "newsletter_subscribers"), orderBy("subscribedAt", "desc"));
@@ -338,6 +432,7 @@ export default function AdminPanelModal({
           title: newsletterTitle || newsletterSubject,
           content: newsletterContent,
           targetLang: newsletterLang,
+          html: generateCustomEmailHtml()
         }),
       });
       const data = await response.json();
@@ -5275,16 +5370,16 @@ export default function AdminPanelModal({
               <div className="space-y-6" id="newsletter-tab-content">
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
                   
-                  {/* Left Column: Compose & Send */}
-                  <div className="lg:col-span-7 bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-5">
+                  {/* Column 1 (5/12): Compose & Style Customizer */}
+                  <div className="lg:col-span-5 bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-5">
                     <div className="flex items-center justify-between pb-3 border-b border-white/5">
                       <div className="flex items-center gap-2 text-purple-400">
                         <MailOpen className="h-4 w-4" />
                         <h4 className="font-display text-xs font-black uppercase tracking-wider">
-                          Bülten Oluştur & Gönder
+                          Bülten Tasarla & Gönder
                         </h4>
                       </div>
-                      <span className="font-mono text-[9px] text-gray-500">// EMAIL BROADCAST</span>
+                      <span className="font-mono text-[9px] text-gray-500">// DESIGN ENGINE</span>
                     </div>
 
                     {/* Announcement Auto-loader */}
@@ -5330,13 +5425,13 @@ export default function AdminPanelModal({
                       {/* Language Selection */}
                       <div className="space-y-1.5">
                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                          Hedef Dil (Duyuru seçimini doldurmadan önce seçin)
+                          Hedef Dil (Target Language)
                         </label>
                         <div className="flex items-center gap-3">
                           <button
                             type="button"
                             onClick={() => setNewsletterLang("TR")}
-                            className={`flex-1 py-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                            className={`flex-1 py-1.5 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
                               newsletterLang === "TR"
                                 ? "bg-purple-600/20 border-purple-500 text-white"
                                 : "bg-white/5 border-white/5 text-gray-400 hover:text-white"
@@ -5347,7 +5442,7 @@ export default function AdminPanelModal({
                           <button
                             type="button"
                             onClick={() => setNewsletterLang("EN")}
-                            className={`flex-1 py-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                            className={`flex-1 py-1.5 rounded-xl border text-[11px] font-bold transition cursor-pointer ${
                               newsletterLang === "EN"
                                 ? "bg-purple-600/20 border-purple-500 text-white"
                                 : "bg-white/5 border-white/5 text-gray-400 hover:text-white"
@@ -5376,7 +5471,7 @@ export default function AdminPanelModal({
                       {/* Email Header Title */}
                       <div className="space-y-1.5">
                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                          E-posta Başlığı (Gövde Üstü Başlık - Opsiyonel)
+                          E-posta Gövde Başlığı
                         </label>
                         <input
                           type="text"
@@ -5390,16 +5485,115 @@ export default function AdminPanelModal({
                       {/* Content Body */}
                       <div className="space-y-1.5">
                         <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                          E-posta Gövde Metni *
+                          Gövde Metni (İçerik) *
                         </label>
                         <textarea
                           required
                           value={newsletterContent}
                           onChange={(e) => setNewsletterContent(e.target.value)}
                           placeholder="Kullanıcıların e-posta kutusunda göreceği bülten içeriği..."
-                          rows={8}
+                          rows={6}
                           className="w-full rounded-xl border border-white/5 bg-[#0e0f1a] px-4 py-3 text-xs text-white placeholder-gray-600 focus:border-purple-500 focus:outline-none transition resize-none font-medium text-left"
                         />
+                      </div>
+
+                      {/* Style Customizer Accordion Box */}
+                      <div className="border-t border-white/5 pt-4 space-y-4">
+                        <div className="flex items-center gap-2 text-purple-400">
+                          <Sliders className="h-3.5 w-3.5" />
+                          <span className="text-[10px] font-bold uppercase tracking-wider">Tasarım & Tema Ayarları</span>
+                        </div>
+
+                        {/* Template style selection buttons */}
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { id: "gaming_dark", label: "Gaming Dark", desc: "Mor lüks karanlık tema" },
+                            { id: "neon_emerald", label: "Neon Emerald", desc: "Hacker yeşili modern tema" },
+                            { id: "cyber_punk", label: "Cyber Punk", desc: "Fütüristik sarı & pembe" },
+                            { id: "classic_light", label: "Classic Light", desc: "Zarif sade beyaz bülten" }
+                          ].map((t) => (
+                            <button
+                              key={t.id}
+                              type="button"
+                              onClick={() => setNewsletterTemplate(t.id as any)}
+                              className={`p-2 rounded-xl border text-left transition cursor-pointer ${
+                                newsletterTemplate === t.id
+                                  ? "bg-purple-600/15 border-purple-500 text-white"
+                                  : "bg-white/[0.02] border-white/5 text-gray-400 hover:text-white"
+                              }`}
+                            >
+                              <span className="text-[11px] font-bold block">{t.label}</span>
+                              <span className="text-[9px] text-gray-500 block leading-tight mt-0.5">{t.desc}</span>
+                            </button>
+                          ))}
+                        </div>
+
+                        {/* Preset & Color Accent Picker */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Vurgu Rengi</label>
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="color"
+                                value={newsletterAccentColor}
+                                onChange={(e) => setNewsletterAccentColor(e.target.value)}
+                                className="w-8 h-8 rounded-lg bg-transparent border border-white/10 cursor-pointer overflow-hidden"
+                              />
+                              <input
+                                type="text"
+                                value={newsletterAccentColor}
+                                onChange={(e) => setNewsletterAccentColor(e.target.value)}
+                                className="flex-1 h-8 rounded-lg border border-white/5 bg-[#0e0f1a] px-2 text-[10px] font-mono text-white focus:outline-none focus:border-purple-500"
+                                placeholder="#a855f7"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Header Görsel (URL)</label>
+                            <input
+                              type="text"
+                              value={newsletterHeaderImg}
+                              onChange={(e) => setNewsletterHeaderImg(e.target.value)}
+                              placeholder="https://gorsel-adresi.com/banner.jpg"
+                              className="w-full h-8 rounded-lg border border-white/5 bg-[#0e0f1a] px-2 text-[10px] text-white focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Call To Action options */}
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Buton Yazısı</label>
+                            <input
+                              type="text"
+                              value={newsletterCtaText}
+                              onChange={(e) => setNewsletterCtaText(e.target.value)}
+                              className="w-full h-8 rounded-lg border border-white/5 bg-[#0e0f1a] px-2 text-[10px] text-white focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+
+                          <div className="space-y-1">
+                            <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Buton Linki</label>
+                            <input
+                              type="text"
+                              value={newsletterCtaUrl}
+                              onChange={(e) => setNewsletterCtaUrl(e.target.value)}
+                              className="w-full h-8 rounded-lg border border-white/5 bg-[#0e0f1a] px-2 text-[10px] text-white focus:outline-none focus:border-purple-500"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Footer customize text */}
+                        <div className="space-y-1">
+                          <label className="block text-[9px] font-bold text-gray-400 uppercase tracking-wider">Dipnot Metni (Footer)</label>
+                          <input
+                            type="text"
+                            value={newsletterFooterNote}
+                            onChange={(e) => setNewsletterFooterNote(e.target.value)}
+                            className="w-full h-8 rounded-lg border border-white/5 bg-[#0e0f1a] px-2 text-[10px] text-white focus:outline-none focus:border-purple-500"
+                          />
+                        </div>
                       </div>
 
                       <button
@@ -5421,7 +5615,7 @@ export default function AdminPanelModal({
                       </button>
                     </form>
 
-                    {/* Newsletter Results */}
+                    {/* Newsletter Results Summary */}
                     {newsletterResult && (
                       <div className="p-4 rounded-xl border border-purple-500/20 bg-purple-500/5 space-y-2">
                         <div className="flex items-center gap-2 text-purple-400">
@@ -5448,13 +5642,89 @@ export default function AdminPanelModal({
                     )}
                   </div>
 
-                  {/* Right Column: Subscriber List */}
-                  <div className="lg:col-span-5 bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-5">
+                  {/* Column 2 (4/12): Live Simulated E-mail Client Preview */}
+                  <div className="lg:col-span-4 bg-[#11121d] rounded-2xl border border-white/5 p-5 flex flex-col space-y-4">
+                    <div className="flex items-center justify-between pb-3 border-b border-white/5">
+                      <div className="flex items-center gap-2 text-purple-400">
+                        <Eye className="h-4 w-4" />
+                        <h4 className="font-display text-xs font-black uppercase tracking-wider">
+                          Canlı E-posta Önizleme
+                        </h4>
+                      </div>
+                      
+                      {/* Responsive View Switcher */}
+                      <div className="flex items-center bg-[#0c0d16] border border-white/5 rounded-lg p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewDevice("desktop")}
+                          className={`px-2 py-1 rounded text-[9px] font-extrabold uppercase tracking-wide transition-all cursor-pointer ${
+                            previewDevice === "desktop"
+                              ? "bg-purple-600 text-white"
+                              : "text-gray-500 hover:text-white"
+                          }`}
+                        >
+                          Masaüstü
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewDevice("mobile")}
+                          className={`px-2 py-1 rounded text-[9px] font-extrabold uppercase tracking-wide transition-all cursor-pointer ${
+                            previewDevice === "mobile"
+                              ? "bg-purple-600 text-white"
+                              : "text-gray-500 hover:text-white"
+                          }`}
+                        >
+                          Mobil
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Email Inbox Mockup Header */}
+                    <div className="bg-[#0b0c15] rounded-xl border border-white/5 p-3.5 space-y-2 text-[10px]">
+                      <div className="flex items-start justify-between border-b border-white/5 pb-2">
+                        <div className="space-y-1">
+                          <p className="text-gray-500 font-medium">
+                            Kimden: <span className="text-purple-400 font-semibold">Weew Portal</span> &lt;newsletter@weew.portal&gt;
+                          </p>
+                          <p className="text-gray-500 font-medium">
+                            Kime: <span className="text-gray-300 font-semibold">bülten-aboneleri@weew.portal</span>
+                          </p>
+                        </div>
+                        <span className="font-mono text-[8px] text-purple-500 font-bold bg-purple-500/10 px-1.5 py-0.5 rounded uppercase">LIVE</span>
+                      </div>
+                      <div>
+                        <p className="text-gray-400 font-semibold truncate">
+                          Konu: <span className="text-white">{newsletterSubject || "(Konu Başlığı Girmelisiniz)"}</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Interactive Frame Wrapper */}
+                    <div className="flex-1 flex items-center justify-center bg-[#07080f] rounded-xl border border-white/5 p-3 min-h-[480px]">
+                      <div 
+                        className={`w-full h-full transition-all duration-300 ease-out flex flex-col ${
+                          previewDevice === "mobile" 
+                            ? "max-w-[280px] border-4 border-[#1c1e30] rounded-2xl overflow-hidden shadow-2xl h-[450px]" 
+                            : "w-full h-[450px]"
+                        }`}
+                      >
+                        <iframe
+                          title="E-posta Bülten Canlı Önizleme"
+                          srcDoc={generateCustomEmailHtml()}
+                          className="w-full h-full bg-white border-0"
+                          sandbox="allow-popups"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Column 3 (3/12): Subscriber List Management */}
+                  <div className="lg:col-span-3 bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-5">
                     <div className="flex items-center justify-between pb-3 border-b border-white/5">
                       <div className="flex items-center gap-2 text-purple-400">
                         <Users className="h-4 w-4" />
                         <h4 className="font-display text-xs font-black uppercase tracking-wider">
-                          Kayıtlı Bülten Aboneleri ({subscribers.length})
+                          Kayıtlı Aboneler ({subscribers.length})
                         </h4>
                       </div>
                     </div>
@@ -5466,65 +5736,62 @@ export default function AdminPanelModal({
                         required
                         value={newManualEmail}
                         onChange={(e) => setNewManualEmail(e.target.value)}
-                        placeholder="Yeni abone e-postası..."
-                        className="flex-1 h-10 rounded-xl border border-white/5 bg-[#0e0f1a] px-3 text-xs text-white placeholder-gray-600 focus:border-purple-500 focus:outline-none transition font-medium"
+                        placeholder="Yeni e-posta ekle..."
+                        className="flex-1 h-9 rounded-xl border border-white/5 bg-[#0e0f1a] px-3 text-[11px] text-white placeholder-gray-600 focus:border-purple-500 focus:outline-none transition font-medium"
                       />
                       <button
                         type="submit"
-                        className="h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white transition flex items-center justify-center cursor-pointer shadow-lg shadow-purple-600/10"
+                        className="h-9 w-9 shrink-0 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white transition flex items-center justify-center cursor-pointer shadow-lg shadow-purple-600/10"
                       >
                         <Plus className="h-4 w-4" />
                       </button>
                     </form>
 
                     {/* Subscribers List */}
-                    <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
+                    <div className="space-y-2 max-h-[450px] overflow-y-auto pr-1 custom-scrollbar">
                       {subscribers.length === 0 ? (
                         <div className="p-6 text-center bg-white/5 rounded-xl border border-white/5">
                           <MailOpen className="h-8 w-8 text-gray-600 mx-auto mb-2 animate-pulse" />
                           <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">ABONE YOK</span>
-                          <p className="text-[9px] text-gray-600 mt-0.5">Sitenizdeki bülten kutusundan henüz kimse abone olmadı.</p>
+                          <p className="text-[9px] text-gray-600 mt-0.5">Henüz kayıtlı abone yok.</p>
                         </div>
                       ) : (
                         subscribers.map((sub) => (
                           <div
                             key={sub.id}
-                            className={`flex items-center justify-between p-3 rounded-xl bg-[#0c0d16] border border-white/5 hover:border-purple-500/10 transition ${
+                            className={`flex flex-col gap-1.5 p-2.5 rounded-xl bg-[#0c0d16] border border-white/5 hover:border-purple-500/10 transition ${
                               !sub.active ? "opacity-55" : ""
                             }`}
                           >
-                            <div className="min-w-0 flex-1">
-                              <span className="text-xs text-white font-medium block truncate">
+                            <div className="min-w-0">
+                              <span className="text-[11px] text-white font-medium block truncate" title={sub.email}>
                                 {sub.email}
                               </span>
-                              <span className="text-[9px] text-gray-500 font-mono block">
+                              <span className="text-[8px] text-gray-500 font-mono block">
                                 {sub.subscribedAt ? new Date(sub.subscribedAt).toLocaleDateString("tr-TR") : "-"}
                               </span>
                             </div>
 
-                            <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                              {/* Status Badge Toggle */}
+                            <div className="flex items-center justify-between pt-1 border-t border-white/[0.03]">
                               <button
                                 type="button"
                                 onClick={() => handleToggleSubscriberActive(sub)}
-                                className={`text-[9px] font-black uppercase px-2 py-1 rounded transition border cursor-pointer ${
+                                className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded transition border cursor-pointer ${
                                   sub.active
                                     ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/20"
                                     : "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20"
                                 }`}
-                                title={sub.active ? "Dondur" : "Aktifleştir"}
                               >
                                 {sub.active ? "Aktif" : "Pasif"}
                               </button>
 
-                              {/* Delete button */}
                               <button
                                 type="button"
                                 onClick={() => handleDeleteSubscriber(sub.id)}
-                                className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white transition border border-red-500/20 cursor-pointer"
+                                className="p-1 rounded bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white transition border border-red-500/20 cursor-pointer"
                                 title="Aboneyi Sil"
                               >
-                                <Trash2 className="h-3 w-3" />
+                                <Trash2 className="h-2.5 w-2.5" />
                               </button>
                             </div>
                           </div>
