@@ -199,7 +199,7 @@ export default function AdminPanelModal({
   notificationsEnabled = false,
   onToggleNotifications
 }: AdminPanelModalProps) {
-  const [activeSubTab, setActiveSubTab] = useState<"dashboard" | "profile" | "settings" | "inbox" | "users" | "stream" | "crosshairs" | "playlists" | "specs" | "announcements" | "giveaways" | "integrations" | "moderation">("dashboard");
+  const [activeSubTab, setActiveSubTab] = useState<"dashboard" | "profile" | "settings" | "inbox" | "users" | "stream" | "crosshairs" | "playlists" | "specs" | "announcements" | "giveaways" | "integrations" | "moderation" | "newsletter">("dashboard");
   const [formData, setFormData] = useState<UserProfile>({ ...profile });
   const [settingsForm, setSettingsForm] = useState<CS2SettingsData>({ ...cs2Settings });
   const [savedSuccess, setSavedSuccess] = useState(false);
@@ -230,6 +230,135 @@ export default function AdminPanelModal({
     });
     return () => unsubscribe();
   }, [activeSubTab]);
+
+  // Newsletter / Bülten Panel States
+  const [subscribers, setSubscribers] = useState<{
+    id: string;
+    email: string;
+    subscribedAt: string;
+    active: boolean;
+  }[]>([]);
+  const [isSendingNewsletter, setIsSendingNewsletter] = useState(false);
+  const [newsletterSubject, setNewsletterSubject] = useState("");
+  const [newsletterTitle, setNewsletterTitle] = useState("");
+  const [newsletterContent, setNewsletterContent] = useState("");
+  const [newsletterLang, setNewsletterLang] = useState<"TR" | "EN">("TR");
+  const [newManualEmail, setNewManualEmail] = useState("");
+  const [selectedAnnIdForNewsletter, setSelectedAnnIdForNewsletter] = useState("");
+  const [newsletterResult, setNewsletterResult] = useState<{
+    success: boolean;
+    sentCount: number;
+    isTestAccount: boolean;
+    previewUrl: string;
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (activeSubTab !== "newsletter") return;
+    const q = query(collection(db, "newsletter_subscribers"), orderBy("subscribedAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: any[] = [];
+      snapshot.forEach((doc) => {
+        list.push({ id: doc.id, ...doc.data() });
+      });
+      setSubscribers(list);
+    }, (error) => {
+      console.error("Error fetching newsletter subscribers:", error);
+    });
+    return () => unsubscribe();
+  }, [activeSubTab]);
+
+  const handleAddManualSubscriber = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newManualEmail) return;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newManualEmail)) {
+      showToast("Geçersiz e-posta adresi!", "error");
+      return;
+    }
+    try {
+      const emailLower = newManualEmail.trim().toLowerCase();
+      const existingSub = subscribers.find((s) => s.email === emailLower);
+      if (existingSub) {
+        showToast("Bu e-posta zaten kayıtlı!", "info");
+        return;
+      }
+      const subscribersCol = collection(db, "newsletter_subscribers");
+      await setDoc(doc(subscribersCol), {
+        email: emailLower,
+        subscribedAt: new Date().toISOString(),
+        active: true,
+      });
+      setNewManualEmail("");
+      showToast("Abone manuel olarak başarıyla eklendi!", "success");
+    } catch (err: any) {
+      console.error("Error adding manual subscriber:", err);
+      showToast("Abone eklenirken hata oluştu!", "error");
+    }
+  };
+
+  const handleToggleSubscriberActive = async (sub: any) => {
+    try {
+      const subRef = doc(db, "newsletter_subscribers", sub.id);
+      await updateDoc(subRef, { active: !sub.active });
+      showToast(sub.active ? "Abone başarıyla donduruldu!" : "Abone başarıyla aktifleştirildi!", "success");
+    } catch (err) {
+      console.error("Error toggling subscriber active status:", err);
+      showToast("Abone durumu güncellenirken hata oluştu!", "error");
+    }
+  };
+
+  const handleDeleteSubscriber = async (id: string) => {
+    try {
+      const subRef = doc(db, "newsletter_subscribers", id);
+      await deleteDoc(subRef);
+      showToast("Abone başarıyla silindi!", "success");
+    } catch (err) {
+      console.error("Error deleting subscriber:", err);
+      showToast("Abone silinirken hata oluştu!", "error");
+    }
+  };
+
+  const handleSendNewsletter = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newsletterSubject || !newsletterContent) {
+      showToast("Lütfen Konu ve İçerik alanlarını doldurun!", "error");
+      return;
+    }
+    setIsSendingNewsletter(true);
+    setNewsletterResult(null);
+    try {
+      const response = await fetch("/api/send-newsletter", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          subject: newsletterSubject,
+          title: newsletterTitle || newsletterSubject,
+          content: newsletterContent,
+          targetLang: newsletterLang,
+        }),
+      });
+      const data = await response.json();
+      if (data.success) {
+        setNewsletterResult(data);
+        showToast(data.message, "success");
+        // Clear fields on success
+        setNewsletterSubject("");
+        setNewsletterTitle("");
+        setNewsletterContent("");
+        setSelectedAnnIdForNewsletter("");
+      } else {
+        showToast(data.error || "Bülten gönderimi başarısız oldu!", "error");
+      }
+    } catch (err: any) {
+      console.error("Error sending newsletter:", err);
+      showToast("Bülten gönderilirken ağ hatası oluştu!", "error");
+    } finally {
+      setIsSendingNewsletter(false);
+    }
+  };
 
   // Manual Moderation Form States
   const [manualUserKey, setManualUserKey] = useState("");
@@ -1425,6 +1554,7 @@ export default function AdminPanelModal({
             { type: "header" as const, label: "Yönetim Paneli" },
             { id: "dashboard", label: "Dashboard", subTab: "dashboard" as const, icon: LayoutDashboard },
             { id: "announcements", label: "Duyuru Paneli (Duyurular)", subTab: "announcements" as const, icon: Megaphone, badge: announcements.length },
+            { id: "newsletter", label: "Bülten (E-posta Gönderimi)", subTab: "newsletter" as const, icon: MailOpen, badge: subscribers.length },
             { id: "inbox", label: "Gelen İletişim Formları", subTab: "inbox" as const, icon: Mail, badge: messages.length },
             { id: "users", label: "Kayıtlı Kullanıcılar", subTab: "users" as const, icon: Users },
             { id: "moderation", label: "Sohbet Moderasyonu", subTab: "moderation" as const, icon: ShieldAlert },
@@ -1663,6 +1793,7 @@ export default function AdminPanelModal({
                 {activeSubTab === "playlists" && "YouTube Oynatma Listesi Yönetimi"}
                 {activeSubTab === "specs" && "Sistem Donanım & Ekipman Özellikleri Yönetimi"}
                 {activeSubTab === "announcements" && "Duyuru Paneli Yönetimi"}
+                {activeSubTab === "newsletter" && "Bülten & E-posta Gönderim Yönetimi"}
                 {activeSubTab === "giveaways" && "İnteraktif Çekiliş Yönetim Merkezi"}
                 {activeSubTab === "moderation" && "Sohbet Moderasyon Paneli (Ban / Mute)"}
               </h2>
@@ -5135,6 +5266,274 @@ export default function AdminPanelModal({
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+
+            {/* Tab: Newsletter Management */}
+            {activeSubTab === "newsletter" && (
+              <div className="space-y-6" id="newsletter-tab-content">
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                  
+                  {/* Left Column: Compose & Send */}
+                  <div className="lg:col-span-7 bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-5">
+                    <div className="flex items-center justify-between pb-3 border-b border-white/5">
+                      <div className="flex items-center gap-2 text-purple-400">
+                        <MailOpen className="h-4 w-4" />
+                        <h4 className="font-display text-xs font-black uppercase tracking-wider">
+                          Bülten Oluştur & Gönder
+                        </h4>
+                      </div>
+                      <span className="font-mono text-[9px] text-gray-500">// EMAIL BROADCAST</span>
+                    </div>
+
+                    {/* Announcement Auto-loader */}
+                    {announcements.length > 0 && (
+                      <div className="bg-[#0b0c15] border border-purple-500/10 p-3 rounded-xl space-y-2">
+                        <label className="block text-[10px] font-bold text-purple-400 uppercase tracking-wider">
+                          Mevcut Duyurulardan Otomatik Doldur
+                        </label>
+                        <select
+                          value={selectedAnnIdForNewsletter}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setSelectedAnnIdForNewsletter(val);
+                            if (val) {
+                              const found = announcements.find((a) => a.id === val);
+                              if (found) {
+                                if (newsletterLang === "TR") {
+                                  setNewsletterSubject(found.titleTR);
+                                  setNewsletterTitle(found.titleTR);
+                                  setNewsletterContent(found.contentTR);
+                                } else {
+                                  setNewsletterSubject(found.titleEN || found.titleTR);
+                                  setNewsletterTitle(found.titleEN || found.titleTR);
+                                  setNewsletterContent(found.contentEN || found.contentTR);
+                                }
+                                showToast("Duyuru verileri başarıyla bültene aktarıldı!", "success");
+                              }
+                            }
+                          }}
+                          className="w-full rounded-xl border border-white/5 bg-[#0e0f1a] px-3 py-2 text-xs text-white focus:border-purple-500 focus:outline-none transition"
+                        >
+                          <option value="">-- Duyuru Seçin --</option>
+                          {announcements.map((ann) => (
+                            <option key={ann.id} value={ann.id}>
+                              {ann.titleTR} ({ann.date})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleSendNewsletter} className="space-y-4">
+                      {/* Language Selection */}
+                      <div className="space-y-1.5">
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          Hedef Dil (Duyuru seçimini doldurmadan önce seçin)
+                        </label>
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => setNewsletterLang("TR")}
+                            className={`flex-1 py-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                              newsletterLang === "TR"
+                                ? "bg-purple-600/20 border-purple-500 text-white"
+                                : "bg-white/5 border-white/5 text-gray-400 hover:text-white"
+                            }`}
+                          >
+                            Türkçe (TR)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setNewsletterLang("EN")}
+                            className={`flex-1 py-2 rounded-xl border text-xs font-bold transition cursor-pointer ${
+                              newsletterLang === "EN"
+                                ? "bg-purple-600/20 border-purple-500 text-white"
+                                : "bg-white/5 border-white/5 text-gray-400 hover:text-white"
+                            }`}
+                          >
+                            English (EN)
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Subject */}
+                      <div className="space-y-1.5">
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          E-posta Konusu (Subject) *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={newsletterSubject}
+                          onChange={(e) => setNewsletterSubject(e.target.value)}
+                          placeholder="Örn: Yeni Sezon Çekilişleri Başladı! 🎁"
+                          className="w-full h-10 rounded-xl border border-white/5 bg-[#0e0f1a] px-4 text-xs text-white placeholder-gray-600 focus:border-purple-500 focus:outline-none transition font-medium"
+                        />
+                      </div>
+
+                      {/* Email Header Title */}
+                      <div className="space-y-1.5">
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          E-posta Başlığı (Gövde Üstü Başlık - Opsiyonel)
+                        </label>
+                        <input
+                          type="text"
+                          value={newsletterTitle}
+                          onChange={(e) => setNewsletterTitle(e.target.value)}
+                          placeholder="Boş bırakılırsa Konu ile aynı olur"
+                          className="w-full h-10 rounded-xl border border-white/5 bg-[#0e0f1a] px-4 text-xs text-white placeholder-gray-600 focus:border-purple-500 focus:outline-none transition font-medium"
+                        />
+                      </div>
+
+                      {/* Content Body */}
+                      <div className="space-y-1.5">
+                        <label className="block text-[10px] font-bold text-gray-400 uppercase tracking-wider">
+                          E-posta Gövde Metni *
+                        </label>
+                        <textarea
+                          required
+                          value={newsletterContent}
+                          onChange={(e) => setNewsletterContent(e.target.value)}
+                          placeholder="Kullanıcıların e-posta kutusunda göreceği bülten içeriği..."
+                          rows={8}
+                          className="w-full rounded-xl border border-white/5 bg-[#0e0f1a] px-4 py-3 text-xs text-white placeholder-gray-600 focus:border-purple-500 focus:outline-none transition resize-none font-medium text-left"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={isSendingNewsletter || subscribers.length === 0}
+                        className="w-full py-3 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-black uppercase tracking-wider text-white transition flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-purple-600/15 disabled:opacity-50"
+                      >
+                        {isSendingNewsletter ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 animate-spin" />
+                            <span>Bülten Gönderiliyor...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="h-4 w-4" />
+                            <span>{subscribers.length} Aboneye Bülteni Gönder</span>
+                          </>
+                        )}
+                      </button>
+                    </form>
+
+                    {/* Newsletter Results */}
+                    {newsletterResult && (
+                      <div className="p-4 rounded-xl border border-purple-500/20 bg-purple-500/5 space-y-2">
+                        <div className="flex items-center gap-2 text-purple-400">
+                          <Check className="h-4 w-4" />
+                          <h5 className="text-xs font-bold">Gönderim Özeti</h5>
+                        </div>
+                        <p className="text-[11px] text-gray-300">
+                          {newsletterResult.message}
+                        </p>
+                        {newsletterResult.isTestAccount && newsletterResult.previewUrl && (
+                          <div className="pt-2">
+                            <a
+                              href={newsletterResult.previewUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 text-[10px] font-extrabold uppercase text-white hover:bg-purple-500 transition cursor-pointer"
+                            >
+                              <span>Test E-posta Kutusunu Aç (Önizle)</span>
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: Subscriber List */}
+                  <div className="lg:col-span-5 bg-[#11121d] rounded-2xl border border-white/5 p-5 space-y-5">
+                    <div className="flex items-center justify-between pb-3 border-b border-white/5">
+                      <div className="flex items-center gap-2 text-purple-400">
+                        <Users className="h-4 w-4" />
+                        <h4 className="font-display text-xs font-black uppercase tracking-wider">
+                          Kayıtlı Bülten Aboneleri ({subscribers.length})
+                        </h4>
+                      </div>
+                    </div>
+
+                    {/* Add Manual Subscriber Form */}
+                    <form onSubmit={handleAddManualSubscriber} className="flex gap-2">
+                      <input
+                        type="email"
+                        required
+                        value={newManualEmail}
+                        onChange={(e) => setNewManualEmail(e.target.value)}
+                        placeholder="Yeni abone e-postası..."
+                        className="flex-1 h-10 rounded-xl border border-white/5 bg-[#0e0f1a] px-3 text-xs text-white placeholder-gray-600 focus:border-purple-500 focus:outline-none transition font-medium"
+                      />
+                      <button
+                        type="submit"
+                        className="h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white transition flex items-center justify-center cursor-pointer shadow-lg shadow-purple-600/10"
+                      >
+                        <Plus className="h-4 w-4" />
+                      </button>
+                    </form>
+
+                    {/* Subscribers List */}
+                    <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1 custom-scrollbar">
+                      {subscribers.length === 0 ? (
+                        <div className="p-6 text-center bg-white/5 rounded-xl border border-white/5">
+                          <MailOpen className="h-8 w-8 text-gray-600 mx-auto mb-2 animate-pulse" />
+                          <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">ABONE YOK</span>
+                          <p className="text-[9px] text-gray-600 mt-0.5">Sitenizdeki bülten kutusundan henüz kimse abone olmadı.</p>
+                        </div>
+                      ) : (
+                        subscribers.map((sub) => (
+                          <div
+                            key={sub.id}
+                            className={`flex items-center justify-between p-3 rounded-xl bg-[#0c0d16] border border-white/5 hover:border-purple-500/10 transition ${
+                              !sub.active ? "opacity-55" : ""
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className="text-xs text-white font-medium block truncate">
+                                {sub.email}
+                              </span>
+                              <span className="text-[9px] text-gray-500 font-mono block">
+                                {sub.subscribedAt ? new Date(sub.subscribedAt).toLocaleDateString("tr-TR") : "-"}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                              {/* Status Badge Toggle */}
+                              <button
+                                type="button"
+                                onClick={() => handleToggleSubscriberActive(sub)}
+                                className={`text-[9px] font-black uppercase px-2 py-1 rounded transition border cursor-pointer ${
+                                  sub.active
+                                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-amber-500/10 hover:text-amber-400 hover:border-amber-500/20"
+                                    : "bg-amber-500/10 text-amber-400 border-amber-500/20 hover:bg-emerald-500/10 hover:text-emerald-400 hover:border-emerald-500/20"
+                                }`}
+                                title={sub.active ? "Dondur" : "Aktifleştir"}
+                              >
+                                {sub.active ? "Aktif" : "Pasif"}
+                              </button>
+
+                              {/* Delete button */}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSubscriber(sub.id)}
+                                className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500 text-red-400 hover:text-white transition border border-red-500/20 cursor-pointer"
+                                title="Aboneyi Sil"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                </div>
               </div>
             )}
 

@@ -19,6 +19,7 @@ import GiveawaySection from "./components/GiveawaySection";
 import { TRANSLATIONS, PLAYLISTS, SYSTEM_SPECS, DEFAULT_GIVEAWAYS } from "./data";
 import { CrosshairItem, PlaylistItem, SpecItem, Announcement } from "./types";
 import AnnouncementSection from "./components/AnnouncementSection";
+import NewsletterSubscription from "./components/NewsletterSubscription";
 import { db } from "./firebase";
 import { doc, setDoc, onSnapshot, increment } from "firebase/firestore";
 
@@ -957,6 +958,9 @@ export default function App() {
                 announcements={announcements} 
                 lang={lang} 
               />
+
+              {/* Newsletter Subscription */}
+              <NewsletterSubscription lang={lang} />
 
               {/* Social Followers Grid */}
               <SocialGrid 
